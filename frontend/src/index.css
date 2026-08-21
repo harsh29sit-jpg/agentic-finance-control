@@ -1,0 +1,96 @@
+@import url('https://fonts.googleapis.com/css2?family=Muli:wght@300;400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 218 54% 20%;
+  --card: 0 0% 100%;
+  --card-foreground: 218 54% 20%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 218 54% 20%;
+  --primary: 206 97% 52%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 231 30% 96%;
+  --secondary-foreground: 213 98% 16%;
+  --muted: 231 20% 96%;
+  --muted-foreground: 218 17% 44%;
+  --accent: 213 98% 16%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 12 91% 46%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 153 96% 44%;
+  --success-foreground: 213 98% 12%;
+  --warning: 33 100% 56%;
+  --warning-foreground: 213 98% 16%;
+  --brand: 206 97% 52%;
+  --border: 231 14% 93%;
+  --input: 231 14% 88%;
+  --ring: 206 97% 52%;
+  --radius: 4px;
+}
+
+.dark {
+  --background: 220 61% 7%;
+  --foreground: 220 13% 96%;
+  --card: 222 47% 11%;
+  --card-foreground: 220 13% 96%;
+  --popover: 222 47% 11%;
+  --popover-foreground: 220 13% 96%;
+  --primary: 206 97% 52%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 219 32% 16%;
+  --secondary-foreground: 220 13% 96%;
+  --muted: 219 32% 16%;
+  --muted-foreground: 218 13% 64%;
+  --accent: 206 97% 52%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 12 80% 52%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 153 80% 46%;
+  --success-foreground: 220 61% 7%;
+  --warning: 33 95% 58%;
+  --warning-foreground: 220 61% 7%;
+  --brand: 206 97% 52%;
+  --border: 219 32% 16%;
+  --input: 219 32% 20%;
+  --ring: 206 97% 52%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  margin: 0;
+  font-family: 'Muli', 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-mono, code, .mono {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-feature-settings: 'tnum' 1;
+}
+
+h1, h2, h3, h4 { letter-spacing: -0.02em; font-weight: 700; }
+
+::selection { background: hsl(var(--brand)); color: #fff; }
+
+/* Thin, crisp scrollbars for a console feel */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.4); }
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Dense table helpers */
+.recon-table th { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.03em; }
+.recon-table td, .recon-table th { padding: 6px 12px; }
+.recon-table tbody tr:hover { background: hsl(var(--secondary)); }

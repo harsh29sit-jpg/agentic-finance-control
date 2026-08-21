@@ -1,0 +1,106 @@
+{
+  "typography": {
+    "primary_font": "Muli, Inter, system-ui, sans-serif",
+    "monospace_font": "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, Courier New, monospace",
+    "body": "14px font size, 1.5 line-height. Used for standard data representation.",
+    "headings": "Font weight 700 (bold), tight tracking (letter-spacing: -0.025em).",
+    "financial_data": "ALWAYS use monospace font for IDs, UTRs, settlement references, and paise values.",
+    "anti_patterns": "Do NOT use massive text sizes. Keep scales institutional (max text-2xl or text-3xl for major page titles)."
+  },
+  "colors": {
+    "light_mode": {
+      "background": "#ffffff",
+      "foreground": "#172b4d",
+      "brand": "#0d94fb",
+      "muted": "#5e6c84",
+      "border": "#ebecf0",
+      "card": "#ffffff",
+      "accent": "#012652",
+      "success": "#04db7c"
+    },
+    "dark_mode": {
+      "background": "#070e1c",
+      "foreground": "#f4f5f7",
+      "muted": "#97a0af",
+      "border": "#1c2536",
+      "card": "#0f172a",
+      "accent": "#0d94fb",
+      "brand": "#0d94fb"
+    },
+    "sidebar": {
+      "background": "#012652",
+      "text": "#ffffff",
+      "active_bg": "#0d94fb"
+    },
+    "status_pills": {
+      "matched": { "bg": "#e6f8f0", "text": "#04db7c", "border": "#04db7c" },
+      "pending_review": { "bg": "#e5f4ff", "text": "#0d94fb", "border": "#0d94fb" },
+      "exception": { "bg": "#ffebe6", "text": "#de350b", "border": "#de350b" },
+      "timing_lag": { "bg": "#fffae6", "text": "#ff991f", "border": "#ff991f" },
+      "high_risk": { "bg": "#bf2600", "text": "#ffffff", "border": "#bf2600" }
+    }
+  },
+  "visual_enhancers": {
+    "borders": "Thin borders everywhere. 1px solid using the specified border hex tokens. Engineered, not decorative.",
+    "radius": "Default 4px, Medium 6px, Large 12px. Sharp corners with subtle rounding. NO fully rounded/pill shapes for large containers.",
+    "shadows": "Minimal. Avoid large soft shadows. Rely on border outlines for depth and crispness.",
+    "tooltips": "Deep navy background (#012652), white highly legible text, 4px radius.",
+    "transparency": "CRITICAL: DO NOT use complete transparent backgrounds in headers, overlays, or surfaces that have content under them."
+  },
+  "component_name": {
+    "reconciliation_workbench": "Dense table, side-by-side ledgers (Source A/B/C), vertical pass-trace timeline, right-side evidence drawer.",
+    "metric_cards": "Compact cards with sparklines, strict 1px border. No excessive internal padding.",
+    "copilot_panel": "Split-view agent surface on the right side of the screen. Incorporate citation cards. Not a full-screen chat.",
+    "exception_command_center": "Grouped by taxonomy/rail. Focus on bulk triage checkboxes and SLA/Value-at-risk sorting.",
+    "sidebar": "High-contrast Prussian Blue (#012652). Compact icons. Sections: Overview, Batches, Recon Workbench, Exceptions, Reports, Audit Logs, Copilot, Admin."
+  },
+  "grids": {
+    "dashboard_metrics": "Grid of 4 to 5 columns depending on screen size. Tight gaps (gap-4).",
+    "data_density": "Maximize pixel utilization. Use compact paddings (e.g., p-2, p-4 max) to fit maximum reconciliation rows on a single viewport."
+  },
+  "layouts": {
+    "architecture": "Fixed Left Sidebar (Prussian Blue) + Main Scrolling Canvas (Light/Dark bg).",
+    "canvas": "Precise, institutional, white/light canvas with strong blue action hierarchy.",
+    "split_view": "When viewing exceptions or using Copilot, shift the main content to 60-70% width and open a fixed right panel (30-40% width)."
+  },
+  "motion": {
+    "transitions": "Fast, precise, deterministic (100ms - 150ms). Slide-ins for evidence drawers. No bouncy, playful spring animations."
+  },
+  "accessibility": {
+    "contrast": "Maintain strict high-contrast text rendering. Muted text must still be legible (WCAG AA).",
+    "focus_states": "Razorpay blue (#0d94fb) 2px focus ring with a 1px offset on all interactive elements.",
+    "data_testid": "MANDATORY. Apply data-testid to every button, tab, table row, and input (e.g., 'approve-exception-btn', 'recon-row-id')."
+  },
+  "media": {
+    "icons": "Use compact, sharp icons (Lucide React or Phosphor React). Documentation-tool feel, not consumer SaaS."
+  },
+  "3d_libraries": {
+    "usage": "NONE. This is a strict 2D, data-dense financial control tower. 3D objects are forbidden here."
+  },
+  "steps": [
+    "Configure Tailwind with exact Razorpay Blade design tokens (colors, fonts, radius).",
+    "Set up full height layout with fixed Prussian Blue sidebar and dynamic navigation states.",
+    "Build standard Dashboard View with dense metric cards and sparklines.",
+    "Construct the dense Reconciliation Workbench table with monospace ID columns and status pills.",
+    "Implement the Exception Command Center with bulk actions.",
+    "Build the split-view Finance Copilot drawer with citation blocks.",
+    "Ensure complete light and dark mode parity."
+  ],
+  "image_urls": {},
+  "instructions_to_main_agent": [
+    "BUILD FOR OPERATORS: Ensure data density is prioritized. Do not use generic SaaS fluffy padding.",
+    "STRICT COLORS: Use only the Razorpay Blade color hexes provided in the tokens. Do not introduce outside colors.",
+    "TYPOGRAPHY RESTRAINT: Enforce monospace fonts strictly for all financial IDs, amounts, and hashes.",
+    "COMPONENT RE-USE: Build modular table components, status pills, and right-drawers that can be repurposed across ledgers.",
+    "Ensure all components use Javascript (.js) rather than Typescript (.tsx) for implementation, respecting the environment context."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Do not apply universal transition (transition: all). Add specific properties.",
+    "Do not center align the app container (.App { text-align: center; }).",
+    "Always use modern, sharp button styles with deterministic interaction animations.",
+    "NEVER use AI assistant emoji characters like 🤖🧠💭💡. Use professional icons.",
+    "Create depth through layered design elements and subtle borders rather than heavy drop-shadows.",
+    "Use sonner for toast notifications. Location should be /app/frontend/src/components/ui/sonner.js.",
+    "All interactive and key informational elements MUST include a data-testid attribute for robust automated testing."
+  ]
+}
