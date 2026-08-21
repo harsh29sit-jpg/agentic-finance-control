@@ -299,3 +299,92 @@ def _compute_metrics(matches, exceptions, b_recs, pass_latency, norm_ms, match_m
             "pass3": round(pass_latency["pass3"] * 1000, 3),
         },
     }
+
+
+
+def compute_benchmark(truth, match_decisions, exception_cases):
+    """Score engine output against a ground-truth set. Returns precision / recall / F1 and confusion counts."""
+    matched_keys = {(m.get("settlement_id") or "").upper() for m in match_decisions if m.get("settlement_id")}
+    exception_keys = {((e.get("settlement_id") or e.get("utr") or "")).upper() for e in exception_cases}
+
+    tp = fp = fn = 0                 # for MATCH classification
+    true_exc_total = true_exc_caught = 0
+    false_matches = []               # true exceptions the engine wrongly auto-posted (dangerous)
+    missed_matches = []              # true matches the engine failed to match
+
+    for t in truth:
+        key = (t["key"] or "").upper()
+        if t["expected"] == "match":
+            if key in matched_keys:
+                tp += 1
+            else:
+                fn += 1
+                missed_matches.append(key)
+        else:  # true exception
+            true_exc_total += 1
+            if key in exception_keys:
+                true_exc_caught += 1
+            if key in matched_keys:
+                fp += 1
+                false_matches.append(key)
+
+    precision = round(tp / (tp + fp) * 100, 2) if (tp + fp) else 100.0
+    match_recall = round(tp / (tp + fn) * 100, 2) if (tp + fn) else 100.0
+    exc_recall = round(true_exc_caught / true_exc_total * 100, 2) if true_exc_total else 100.0
+    f1 = round(2 * precision * match_recall / (precision + match_recall), 2) if (precision + match_recall) else 0.0
+    false_match_rate = round(fp / len(truth) * 100, 3) if truth else 0.0
+
+    return {
+        "truth_size": len(truth),
+        "true_positive": tp, "false_positive": fp, "false_negative": fn,
+        "true_exceptions_total": true_exc_total, "true_exceptions_caught": true_exc_caught,
+        "auto_match_precision": precision,
+        "match_recall": match_recall,
+        "exception_recall": exc_recall,
+        "f1_score": f1,
+        "false_match_rate": false_match_rate,
+        "false_matches": false_matches,
+        "missed_matches": missed_matches,
+        "gates": {
+            "precision_ok": precision >= 99.0,
+            "exception_recall_ok": exc_recall >= 100.0,
+            "false_match_ok": false_match_rate < 0.5,
+        },
+    }
+
+
+def diff_batches(base_matches, base_excs, cmp_matches, cmp_excs):
+    """Compare two reconciliation runs (reruns) at settlement level for the audit diff view."""
+    def index(matches):
+        return {m["settlement_id"]: m for m in matches if m.get("settlement_id")}
+
+    base_m, cmp_m = index(base_matches), index(cmp_matches)
+    base_e = {(e.get("settlement_id") or e.get("utr")): e for e in base_excs}
+    cmp_e = {(e.get("settlement_id") or e.get("utr")): e for e in cmp_excs}
+
+    changes = []
+    keys = set(base_m) | set(cmp_m) | set(base_e) | set(cmp_e)
+    for k in sorted(keys):
+        b_state = "matched" if k in base_m else ("exception" if k in base_e else "absent")
+        c_state = "matched" if k in cmp_m else ("exception" if k in cmp_e else "absent")
+        b_pass = base_m[k]["pass_number"] if k in base_m else None
+        c_pass = cmp_m[k]["pass_number"] if k in cmp_m else None
+        b_tax = base_e[k]["taxonomy"] if k in base_e else None
+        c_tax = cmp_e[k]["taxonomy"] if k in cmp_e else None
+        if b_state != c_state or b_pass != c_pass or b_tax != c_tax:
+            kind = "resolved" if (b_state == "exception" and c_state == "matched") else \
+                   "regressed" if (b_state == "matched" and c_state == "exception") else "changed"
+            changes.append({
+                "key": k, "kind": kind,
+                "base_state": b_state, "compare_state": c_state,
+                "base_pass": b_pass, "compare_pass": c_pass,
+                "base_taxonomy": b_tax, "compare_taxonomy": c_tax,
+            })
+
+    return {
+        "total_changes": len(changes),
+        "resolved": sum(1 for c in changes if c["kind"] == "resolved"),
+        "regressed": sum(1 for c in changes if c["kind"] == "regressed"),
+        "changed": sum(1 for c in changes if c["kind"] == "changed"),
+        "changes": changes,
+    }

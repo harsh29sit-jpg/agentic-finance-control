@@ -2,11 +2,12 @@ import { useEffect, useState, useCallback } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import PageHeader from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/StatusPill";
 import { EvidenceDrawer } from "@/components/EvidenceDrawer";
 import { rupees, rupeesCompact, TAXONOMY_LABEL } from "@/lib/format";
 import { toast } from "sonner";
-import { AlertTriangle, Clock } from "lucide-react";
+import { AlertTriangle, Clock, CheckCheck, ArrowUpCircle } from "lucide-react";
 
 const GROUPS = [{ k: "none", l: "Flat" }, { k: "taxonomy", l: "Taxonomy" }, { k: "merchant_id", l: "Merchant" }, { k: "rail", l: "Bank / Rail" }];
 
@@ -18,6 +19,7 @@ export default function Exceptions() {
   const [data, setData] = useState({ grouped: false, items: [] });
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [bulkNote, setBulkNote] = useState("");
   const canApprove = ["controller", "admin"].includes(user?.role);
 
   useEffect(() => {
@@ -58,6 +60,18 @@ export default function Exceptions() {
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); } finally { setBusy(false); }
   };
 
+  const bulkReview = async (action, g) => {
+    setBusy(true);
+    try {
+      const payload = { batch_id: batchId, action, note: bulkNote };
+      if (groupBy === "taxonomy") payload.taxonomy = g.key;
+      else payload.ids = g.items.filter((i) => ["open", "escalated"].includes(i.status)).map((i) => i.id);
+      const { data } = await api.post("/exceptions/bulk-review", payload);
+      toast.success(`${data.affected} case(s) ${data.status}`);
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Bulk action failed"); } finally { setBusy(false); }
+  };
+
   const Row = ({ c }) => (
     <tr data-testid={`exception-row-${c.id}`} className="cursor-pointer" onClick={() => setSelected(c)}>
       <td><span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-destructive">{TAXONOMY_LABEL[c.taxonomy] || c.taxonomy}</span></td>
@@ -83,6 +97,11 @@ export default function Exceptions() {
       <PageHeader title="Exception Command Center" subtitle="Resolve the long tail · bulk triage · value-at-risk sorting"
         actions={
           <div className="flex items-center gap-2">
+            {groupBy !== "none" && (
+              <input data-testid="bulk-note-input" value={bulkNote} onChange={(e) => setBulkNote(e.target.value)}
+                placeholder="Shared bulk note (audited)…"
+                className="h-9 w-48 rounded border border-input bg-background px-2.5 text-xs outline-none focus:ring-2 focus:ring-brand" />
+            )}
             <div className="flex rounded border border-border p-0.5">
               {GROUPS.map((g) => <button key={g.k} data-testid={`group-${g.k}`} onClick={() => setGroupBy(g.k)}
                 className={`rounded px-2.5 py-1 text-xs font-semibold ${groupBy === g.k ? "bg-brand text-white" : "hover:bg-secondary"}`}>{g.l}</button>)}
@@ -102,7 +121,13 @@ export default function Exceptions() {
                   <AlertTriangle size={14} /> {TAXONOMY_LABEL[g.key] || g.key}
                   <span className="rounded bg-white/15 px-1.5 py-0.5 font-mono text-[10px]">{g.count}</span>
                 </div>
-                <span className="font-mono text-xs">{rupeesCompact(g.value_at_risk_paise)} at risk</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs">{rupeesCompact(g.value_at_risk_paise)} at risk</span>
+                  <Button size="sm" data-testid={`bulk-resolve-${g.key}`} disabled={busy} onClick={() => bulkReview("resolve", g)}
+                    className="h-6 gap-1 bg-success px-2 text-[10px] font-semibold text-success-foreground hover:bg-success/90"><CheckCheck size={12} /> Resolve all</Button>
+                  <Button size="sm" data-testid={`bulk-escalate-${g.key}`} disabled={busy} onClick={() => bulkReview("escalate", g)}
+                    className="h-6 gap-1 border border-white/30 bg-white/10 px-2 text-[10px] font-semibold text-white hover:bg-white/20"><ArrowUpCircle size={12} /> Escalate all</Button>
+                </div>
               </div>
               <table className="recon-table w-full text-left text-xs"><Head /><tbody className="divide-y divide-border">{g.items.map((c) => <Row key={c.id} c={c} />)}</tbody></table>
             </div>

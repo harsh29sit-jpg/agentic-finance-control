@@ -1,0 +1,39 @@
+{
+  "summary": "Validated the 3 NEW features (Bulk Triage, Evaluation Dashboard, Rerun Diff) end-to-end on backend + frontend. Wrote /app/backend/tests/test_new_features.py (10 pytest cases, 10/10 PASS in 4.5s) covering: bulk-review by taxonomy, bulk-review by ids, support RBAC 403, bulk_* audit event write, invalid action 400, /benchmark/{id} returns has_truth+precision=100+match_recall=100+exception_recall=100+F1=100+FP=0 with all 3 gates green for the seeded demo batch, /benchmark returns full score array, unknown batch 404, /batches/{id}/rerun with SAME policy yields total_changes=0/regressed=0 (idempotent), stricter policy (amount_tolerance_paise=0) triggers regressed>0, and policy is restored to 100 paise after the test. Also re-ran the existing regression suite (backend_test.py) — 18/18 PASS. Playwright drove analyst login → Evaluation page (screenshot confirmed AUTO-MATCH PRECISION 100%, MATCH RECALL 100%, EXCEPTION RECALL 100%, F1 100%, 36 TP / 0 FP / 0 FN / 45 labelled records, all 3 gates green, 9-row cross-batch trend table) → /batches: ran a fresh demo, clicked rerun-btn-{id} which navigated to /audit?diff=1&base=..&compare=.. (URL confirmed) → Audit Rerun Diff tab rendered diff-base-select + diff-compare-select + Total/Resolved/Regressed/Other=0 summary + 'No differences — reruns are identical (idempotent)' → /exceptions grouped by taxonomy showed 5 bulk-resolve + 5 bulk-escalate buttons + bulk-note-input; typing a note + clicking bulk-escalate-MISSING_IN_BANK produced 3 ESCALATED pills, then clicking bulk-resolve produced 3 RESOLVED pills with toast '2 case(s) resolved'. All three features working as spec.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard (Overview)", "issues": ["Still emits Recharts 'width(-1)/height(-1)' console warnings on initial mount (carry-over from iteration_1). Charts render fine but noise remains. Add explicit height/minHeight to ResponsiveContainer wrappers."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/new_features.xml"
+  ],
+  "action_items": [
+    "(Non-blocking) Fix Recharts container sizing warnings on Dashboard.",
+    "(Optional) RBAC UI hint — Evaluation and Batches sidebar entries are visible to Support, but backend correctly enforces role. Consider hiding rerun-btn from Support since /batches/{id}/rerun requires analyst/controller/admin."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 579 lines and still monolithic — worth splitting into routers (auth, batches, reconciliation, exceptions, benchmark, diff, audit, copilot, policies). Not blocking.",
+    "diff_batches() key normalisation: engine upper-cases settlement_id — confirmed working (idempotent rerun returns 0 changes and stricter policy correctly flips 2 AMOUNT_MISMATCH rows to regressed).",
+    "In /api/exceptions/bulk-review, when only `ids` is provided the query still requires batch_id (fine) but silently ignores ids belonging to a different batch. Consider validating that all supplied ids belong to the given batch_id.",
+    "Bulk review writes ONE audit event with entity_id = taxonomy OR literal 'selection' when using ids. For traceability, consider recording the affected id list (or count only, if PII/size concerns)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_new_features.py (new file)"
+  ],
+  "success_rate": {"backend": "100% (10/10 new + 18/18 regression = 28/28)", "frontend": "100% on the 3 new features"},
+  "test_credentials": "analyst@recon.io/analyst123, controller@recon.io/controller123, admin@recon.io/admin123, support@recon.io/support123 — verified via /api/auth/login.",
+  "seed_data_creation": "Ran POST /api/batches/run-demo multiple times during tests. Stricter-policy rerun test PUBLISHED then RESTORED amount_tolerance_paise=100 (verified in teardown). No test data left dangling except newly created rerun batches which are expected.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Two backend test files: /app/backend/tests/backend_test.py (regression, 18 tests) and /app/backend/tests/test_new_features.py (new features, 10 tests). Run both with `pytest /app/backend/tests/ -v`. The stricter-policy test in TestRerunDiff::test_stricter_policy_causes_regressions publishes tolerance=0 then restores to 100 in a finally block — if it ever fails mid-way, verify policy is back to 100 via GET /api/policies before continuing. Sidebar testids: nav-overview, nav-batches, nav-reconciliation-workbench, nav-exceptions, nav-reports, nav-evaluation (NEW), nav-audit-logs, nav-copilot. New feature testids: bulk-resolve-{taxonomy}, bulk-escalate-{taxonomy}, bulk-note-input, eval-batch-select, rerun-btn-{batchId}, audit-tab-diff, diff-base-select, diff-compare-select, diff-row-{key}.",
+  "rca of the issue": "N/A — no bugs found in this iteration."
+}

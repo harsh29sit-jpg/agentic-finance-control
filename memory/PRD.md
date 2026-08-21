@@ -36,6 +36,12 @@ Build a modern agentic finance-ops web platform in the Razorpay Blade design sys
 - Blade theme (light/dark), monospace technical data, dense tables.
 - Verified: 18/18 backend tests pass; frontend flows functional.
 
+### Iteration 2 (2026-06) — Bulk Triage, Evaluation, Rerun Diff
+- **Bulk Triage**: POST /api/exceptions/bulk-review resolves/escalates/rejects a whole taxonomy group (or id set) with a shared audited note; grouped Exceptions view has per-group Resolve all / Escalate all buttons.
+- **Evaluation Dashboard** (`/evaluation`): benchmark engine output vs ground-truth labels (seeded per demo batch). Scores auto-match precision, match recall, exception recall, F1, false-match rate; confusion matrix, acceptance gates, cross-batch trend. Endpoints /api/benchmark and /api/benchmark/{id}.
+- **Rerun Diff**: POST /api/batches/{id}/rerun re-processes the same source under the current policy (parent-linked); GET /api/diff?base=&compare= returns per-settlement changes (resolved/regressed/changed). Rerun button on Batches, new "Rerun Diff" tab in Audit console. Tightening policy tolerance + rerun demonstrates regressions.
+- Verified: 28/28 backend tests pass (10 new + 18 regression); 100% frontend on new features. Read-only Support role gated out of write actions.
+
 ## Backlog (P1/P2)
 - P1: table virtualization for very large batches; scheduled/async batch workers.
 - P1: field masking/tokenization before AI calls (spec'd, currently no PAN in pipeline).

@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Layers, GitCompareArrows, AlertTriangle, FileBarChart2,
-  ScrollText, Sparkles, ShieldCheck, Moon, Sun, LogOut, CircleUser,
+  ScrollText, Sparkles, ShieldCheck, Gauge, Moon, Sun, LogOut, CircleUser,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -13,6 +13,7 @@ const NAV = [
   { to: "/workbench", label: "Reconciliation Workbench", icon: GitCompareArrows },
   { to: "/exceptions", label: "Exceptions", icon: AlertTriangle },
   { to: "/reports", label: "Reports", icon: FileBarChart2 },
+  { to: "/evaluation", label: "Evaluation", icon: Gauge },
   { to: "/audit", label: "Audit Logs", icon: ScrollText },
   { to: "/copilot", label: "Copilot", icon: Sparkles },
   { to: "/admin", label: "Admin / Policies", icon: ShieldCheck, roles: ["admin", "controller"] },

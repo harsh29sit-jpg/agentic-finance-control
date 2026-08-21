@@ -22,6 +22,14 @@ class ReviewAction(BaseModel):
     note: Optional[str] = ""
 
 
+class BulkReview(BaseModel):
+    batch_id: str
+    action: str  # resolve | escalate | reject
+    note: Optional[str] = ""
+    taxonomy: Optional[str] = None
+    ids: Optional[List[str]] = None
+
+
 class OverrideDecision(BaseModel):
     approve: bool
     note: Optional[str] = ""

@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/StatusPill";
 import { rupeesCompact, fmtDate } from "@/lib/format";
 import { toast } from "sonner";
-import { Play, Upload, Database } from "lucide-react";
+import { Play, Upload, Database, RotateCw } from "lucide-react";
 
 export default function Batches() {
+  const { user } = useAuth();
+  const canWrite = user?.role !== "support";
   const [batches, setBatches] = useState([]);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
@@ -39,6 +42,18 @@ export default function Batches() {
     finally { setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
   };
 
+  const rerun = async (e, b) => {
+    e.stopPropagation();
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/batches/${b.id}/rerun`);
+      toast.success(`Rerun created · ${data.name}`);
+      await load();
+      navigate(`/audit?diff=1&base=${b.parent_batch_id || b.id}&compare=${data.id}`);
+    } catch (err) { toast.error(err.response?.data?.detail || "Rerun failed"); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div>
       <PageHeader title="Batch Ingestion" subtitle="Upload or schedule Source A / B / C ledgers · idempotent re-runs"
@@ -46,8 +61,10 @@ export default function Batches() {
           <input placeholder="Batch name" value={name} onChange={(e) => setName(e.target.value)}
             data-testid="batch-name-input" className="h-9 w-40 rounded border border-input bg-background px-2.5 text-xs outline-none focus:ring-2 focus:ring-brand" />
           <input ref={fileRef} type="file" accept=".csv,.json" onChange={upload} className="hidden" data-testid="upload-input" />
-          <Button variant="outline" className="h-9 gap-1.5" disabled={busy} data-testid="upload-btn" onClick={() => fileRef.current?.click()}><Upload size={15} /> Upload CSV/JSON</Button>
-          <Button className="h-9 gap-1.5 bg-brand text-white hover:bg-brand/90" disabled={busy} data-testid="batch-run-demo" onClick={runDemo}><Play size={15} /> Run Demo Batch</Button>
+          {canWrite && <>
+            <Button variant="outline" className="h-9 gap-1.5" disabled={busy} data-testid="upload-btn" onClick={() => fileRef.current?.click()}><Upload size={15} /> Upload CSV/JSON</Button>
+            <Button className="h-9 gap-1.5 bg-brand text-white hover:bg-brand/90" disabled={busy} data-testid="batch-run-demo" onClick={runDemo}><Play size={15} /> Run Demo Batch</Button>
+          </>}
         </>} />
 
       <div className="p-6">
@@ -77,7 +94,17 @@ export default function Batches() {
                   <td className="text-right font-mono">{b.metrics.open_exceptions}</td>
                   <td><StatusPill status="matched" label="Reconciled" /></td>
                   <td className="text-muted-foreground">{fmtDate(b.created_at)}</td>
-                  <td className="text-right text-brand">Open →</td>
+                  <td className="text-right">
+                    <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                      {canWrite && (
+                        <button data-testid={`rerun-btn-${b.id}`} disabled={busy} onClick={(e) => rerun(e, b)}
+                          className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground transition-colors hover:border-brand hover:text-brand disabled:opacity-50">
+                          <RotateCw size={12} /> Rerun
+                        </button>
+                      )}
+                      <button onClick={() => navigate(`/workbench?batch=${b.id}`)} className="text-brand">Open →</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

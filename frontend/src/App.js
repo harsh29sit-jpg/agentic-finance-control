@@ -10,6 +10,7 @@ import Batches from "@/pages/Batches";
 import Workbench from "@/pages/Workbench";
 import Exceptions from "@/pages/Exceptions";
 import Reports from "@/pages/Reports";
+import Evaluation from "@/pages/Evaluation";
 import Audit from "@/pages/Audit";
 import Copilot from "@/pages/Copilot";
 import Admin from "@/pages/Admin";
@@ -29,6 +30,7 @@ function App() {
               <Route path="/workbench" element={<P><Workbench /></P>} />
               <Route path="/exceptions" element={<P><Exceptions /></P>} />
               <Route path="/reports" element={<P><Reports /></P>} />
+              <Route path="/evaluation" element={<P><Evaluation /></P>} />
               <Route path="/audit" element={<P><Audit /></P>} />
               <Route path="/copilot" element={<P><Copilot /></P>} />
               <Route path="/admin" element={<P><Admin /></P>} />

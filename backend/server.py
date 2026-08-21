@@ -16,9 +16,9 @@ import csv
 import io
 import json
 
-from models import ReviewAction, OverrideDecision, CopilotAsk, PolicyUpdate, TAXONOMY, ROLES
-from engine import run_reconciliation
-from seed_data import generate_ledgers
+from models import ReviewAction, OverrideDecision, CopilotAsk, PolicyUpdate, TAXONOMY, ROLES, BulkReview
+from engine import run_reconciliation, compute_benchmark, diff_batches
+from seed_data import generate_batch
 import agents
 from auth import build_auth_router, require_roles, seed_users, ROLE_LABELS
 
@@ -67,7 +67,8 @@ async def record_invocation(inv, batch_id, entity_id):
 
 
 # ---------------- batches / ingestion ----------------
-async def _process_batch(name, rows, actor, role, source_label):
+async def _process_batch(name, rows, actor, role, source_label, truth=None,
+                         rerun_seed=None, parent_batch_id=None, save_rows=None):
     policy = await active_policy()
     result = run_reconciliation(rows, policy)
     batch_id = str(uuid.uuid4())
@@ -76,8 +77,12 @@ async def _process_batch(name, rows, actor, role, source_label):
         "created_by": actor, "created_at": now_iso(), "status": "reconciled",
         "policy_version": policy.get("version", 1),
         "counts": result["counts"], "metrics": result["metrics"],
+        "truth": truth or [], "has_truth": bool(truth),
+        "rerun_seed": rerun_seed, "parent_batch_id": parent_batch_id,
     }
     await db.batches.insert_one(dict(batch))
+    if save_rows is not None:
+        await db.raw_files.insert_one({"batch_id": batch_id, "rows": save_rows, "created_at": now_iso()})
 
     for m in result["match_decisions"]:
         m["id"] = str(uuid.uuid4())
@@ -109,12 +114,38 @@ async def _process_batch(name, rows, actor, role, source_label):
 @api.post("/batches/run-demo")
 async def run_demo(user: dict = Depends(require_roles(get_current_user, "analyst", "controller", "admin"))):
     seq = await db.batches.count_documents({})
-    rows = generate_ledgers(seed=42 + seq)
+    seed = 42 + seq
+    rows, truth = generate_batch(seed=seed)
     batch = await _process_batch(
-        f"Demo Settlement Batch #{seq + 1}", rows, user["email"], user["role"], "seed:A+B+C")
+        f"Demo Settlement Batch #{seq + 1}", rows, user["email"], user["role"], "seed:A+B+C",
+        truth=truth, rerun_seed=seed)
     await audit_log(batch["id"], user["email"], user["role"], "batch_created", "batch", batch["id"],
                     {"counts": batch["counts"], "source": "demo"})
     return batch
+
+
+@api.post("/batches/{batch_id}/rerun")
+async def rerun_batch(batch_id: str,
+                      user: dict = Depends(require_roles(get_current_user, "analyst", "controller", "admin"))):
+    base = await db.batches.find_one({"id": batch_id}, {"_id": 0})
+    if not base:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    root_id = base.get("parent_batch_id") or batch_id
+    n_reruns = await db.batches.count_documents({"parent_batch_id": root_id})
+    if base.get("rerun_seed") is not None:
+        rows, truth = generate_batch(seed=base["rerun_seed"])
+        rerun_seed = base["rerun_seed"]
+    else:
+        raw = await db.raw_files.find_one({"batch_id": batch_id})
+        if not raw:
+            raise HTTPException(status_code=400, detail="Original source rows unavailable for rerun")
+        rows, truth, rerun_seed = raw["rows"], [], None
+    new = await _process_batch(
+        f"{base['name']} (rerun {n_reruns + 1})", rows, user["email"], user["role"],
+        base["source_label"], truth=truth, rerun_seed=rerun_seed, parent_batch_id=root_id)
+    await audit_log(new["id"], user["email"], user["role"], "batch_rerun", "batch", new["id"],
+                    {"parent_batch_id": root_id, "policy_version": new["policy_version"]})
+    return new
 
 
 @api.post("/ingestion/upload")
@@ -136,7 +167,8 @@ async def upload_batch(
         rows = [dict(r) for r in reader]
     if not rows:
         raise HTTPException(status_code=400, detail="No records found in file")
-    batch = await _process_batch(name, rows, user["email"], user["role"], f"upload:{file.filename}")
+    batch = await _process_batch(name, rows, user["email"], user["role"], f"upload:{file.filename}",
+                                 save_rows=rows)
     await audit_log(batch["id"], user["email"], user["role"], "batch_created", "batch", batch["id"],
                     {"counts": batch["counts"], "source": file.filename})
     return batch
@@ -144,7 +176,7 @@ async def upload_batch(
 
 @api.get("/batches")
 async def list_batches(user: dict = Depends(get_current_user)):
-    docs = await db.batches.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    docs = await db.batches.find({}, {"_id": 0, "truth": 0}).sort("created_at", -1).to_list(200)
     return docs
 
 
@@ -260,6 +292,30 @@ async def get_exception(case_id: str, user: dict = Depends(get_current_user)):
     return doc
 
 
+@api.post("/exceptions/bulk-review")
+async def bulk_review(body: BulkReview,
+                      user: dict = Depends(require_roles(get_current_user, "analyst", "controller", "admin"))):
+    if body.action not in ("resolve", "escalate", "reject"):
+        raise HTTPException(status_code=400, detail="Invalid bulk action")
+    q = {"batch_id": body.batch_id, "status": {"$in": ["open", "escalated"]}}
+    if body.taxonomy:
+        q["taxonomy"] = body.taxonomy
+    if body.ids:
+        q["id"] = {"$in": body.ids}
+    cases = await db.exception_cases.find(q, {"_id": 0}).to_list(2000)
+    status = {"resolve": "resolved", "escalate": "escalated", "reject": "rejected"}[body.action]
+    review = {"action": body.action, "by": user["email"], "role": user["role"],
+              "note": body.note, "at": now_iso(), "bulk": True}
+    ids = [c["id"] for c in cases]
+    if ids:
+        await db.exception_cases.update_many({"id": {"$in": ids}},
+                                             {"$set": {"status": status, "review": review}})
+    await audit_log(body.batch_id, user["email"], user["role"], f"bulk_{body.action}",
+                    "exception_case", body.taxonomy or "selection",
+                    {"count": len(ids), "taxonomy": body.taxonomy, "note": body.note})
+    return {"ok": True, "affected": len(ids), "status": status}
+
+
 @api.post("/exceptions/{case_id}/analyze")
 async def analyze_exception(case_id: str,
                             user: dict = Depends(require_roles(get_current_user, "analyst", "controller", "admin"))):
@@ -365,6 +421,57 @@ async def batch_report(batch_id: str, user: dict = Depends(get_current_user)):
         "value_at_risk_by_merchant": [{"key": k, "value_paise": v} for k, v in sorted(by_merchant.items(), key=lambda x: -x[1])],
         "value_at_risk_by_rail": [{"key": k, "value_paise": v} for k, v in sorted(by_rail.items(), key=lambda x: -x[1])],
         "acceptance_gates": gates,
+    }
+
+
+# ---------------- benchmark / evaluation ----------------
+@api.get("/benchmark/{batch_id}")
+async def benchmark(batch_id: str, user: dict = Depends(get_current_user)):
+    batch = await db.batches.find_one({"id": batch_id}, {"_id": 0})
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    truth = batch.get("truth") or []
+    if not truth:
+        return {"has_truth": False, "batch_id": batch_id, "batch_name": batch["name"],
+                "message": "No labelled truth-set available for this batch (uploaded batches are unlabelled)."}
+    matches = await db.match_decisions.find({"batch_id": batch_id}, {"_id": 0}).to_list(2000)
+    excs = await db.exception_cases.find({"batch_id": batch_id}, {"_id": 0}).to_list(2000)
+    score = compute_benchmark(truth, matches, excs)
+    return {"has_truth": True, "batch_id": batch_id, "batch_name": batch["name"],
+            "policy_version": batch.get("policy_version"), **score}
+
+
+@api.get("/benchmark")
+async def benchmark_all(user: dict = Depends(get_current_user)):
+    batches = await db.batches.find({"has_truth": True}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    out = []
+    for b in batches:
+        matches = await db.match_decisions.find({"batch_id": b["id"]}, {"_id": 0}).to_list(2000)
+        excs = await db.exception_cases.find({"batch_id": b["id"]}, {"_id": 0}).to_list(2000)
+        score = compute_benchmark(b.get("truth") or [], matches, excs)
+        out.append({"batch_id": b["id"], "batch_name": b["name"],
+                    "policy_version": b.get("policy_version"), "created_at": b["created_at"], **score})
+    return out
+
+
+# ---------------- rerun diff ----------------
+@api.get("/diff")
+async def diff(base: str, compare: str, user: dict = Depends(get_current_user)):
+    b = await db.batches.find_one({"id": base}, {"_id": 0})
+    c = await db.batches.find_one({"id": compare}, {"_id": 0})
+    if not b or not c:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    bm = await db.match_decisions.find({"batch_id": base}, {"_id": 0}).to_list(2000)
+    be = await db.exception_cases.find({"batch_id": base}, {"_id": 0}).to_list(2000)
+    cm = await db.match_decisions.find({"batch_id": compare}, {"_id": 0}).to_list(2000)
+    ce = await db.exception_cases.find({"batch_id": compare}, {"_id": 0}).to_list(2000)
+    result = diff_batches(bm, be, cm, ce)
+    return {
+        "base": {"id": base, "name": b["name"], "policy_version": b.get("policy_version"),
+                 "metrics": b["metrics"], "created_at": b["created_at"]},
+        "compare": {"id": compare, "name": c["name"], "policy_version": c.get("policy_version"),
+                    "metrics": c["metrics"], "created_at": c["created_at"]},
+        **result,
     }
 
 
