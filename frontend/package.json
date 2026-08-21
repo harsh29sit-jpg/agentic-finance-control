@@ -12,8 +12,8 @@
     "@radix-ui/react-collapsible": "1.1.8",
     "@radix-ui/react-context-menu": "2.2.12",
     "@radix-ui/react-dialog": "1.1.11",
-    "@radix-ui/react-dropdown-menu": "2.1.12",
-    "@radix-ui/react-hover-card": "2.2.8",
+    "@radix-ui/react-dropdown-menu": "2.2.8",
+    "@radix-ui/react-hover-card": "1.1.7",
     "@radix-ui/react-label": "2.1.4",
     "@radix-ui/react-menubar": "1.2.12",
     "@radix-ui/react-navigation-menu": "1.2.10",
@@ -66,16 +66,8 @@
     "test": "craco test"
   },
   "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
   },
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "7.21.11",
@@ -117,9 +109,9 @@
     "resolve-url-loader": "5.0.0",
     "**/resolve-url-loader/postcss": "8.5.10",
     "**/axios/form-data": "4.0.6",
-    "**/jsdom/form-data": "3.0.5",
+    "**/jsdom/form-data": "3.0.0",
     "**/postcss-svgo/svgo": "2.8.1",
-    "**/webpack-dev-dev-server/ws": "8.21.0",
+    "**/webpack-dev-server/ws": "8.21.0",
     "**/postcss-load-config/yaml": "2.8.3",
     "**/cosmiconfig/yaml": "1.10.0",
     "**/cssnano/yaml": "1.10.0",
