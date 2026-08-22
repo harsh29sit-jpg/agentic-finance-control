@@ -26,7 +26,7 @@ export default function Workbench() {
   useEffect(() => {
     api.get("/batches").then(({ data }) => {
       setBatches(data);
-      if (!batchId && data[0]) { setBatchId(data[0].id); }
+      setBatchId((current) => current || (data[0]?.id || ""));
     });
   }, []);
 
@@ -58,7 +58,6 @@ export default function Workbench() {
       <PageHeader title="Reconciliation Workbench" subtitle="Source A / B / C side-by-side · pass trace · evidence drawer"
         actions={<BatchSelect batches={batches} value={batchId} onChange={setBatchId} />} />
 
-      {/* Summary strip */}
       <div className="flex items-center gap-6 border-b border-border bg-secondary/30 px-6 py-2.5 text-xs">
         <span><b className="font-mono text-success">{summary.matched}</b> matched</span>
         <span><b className="font-mono text-brand">{summary.pending}</b> pending review</span>
