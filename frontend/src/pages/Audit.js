@@ -30,8 +30,8 @@ export default function Audit() {
   useEffect(() => {
     api.get("/batches").then(({ data }) => {
       setBatches(data);
-      if (data[0] && !base) setBase(data[0].id);
-      if (data[1] && !compare) setCompare(data[1].id);
+      setBase((current) => current || (data[0]?.id || ""));
+      setCompare((current) => current || (data[1]?.id || ""));
     });
   }, []);
 
@@ -58,7 +58,7 @@ export default function Audit() {
           </select>)} />
 
       <div className="flex gap-1 border-b border-border px-6">
-        {[["events", "Decision Timeline", ScrollText], ["models", "Model Invocations", Cpu], ["diff", "Rerun Diff", GitCompareArrows]].map(([k, l, Icon]) => (
+        {[['events', 'Decision Timeline', ScrollText], ['models', 'Model Invocations', Cpu], ['diff', 'Rerun Diff', GitCompareArrows]].map(([k, l, Icon]) => (
           <button key={k} data-testid={`audit-tab-${k}`} onClick={() => setTab(k)}
             className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-semibold ${tab === k ? "border-brand text-brand" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
             <Icon size={14} /> {l}
@@ -138,8 +138,8 @@ export default function Audit() {
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                  {[["Total changes", diff.total_changes, "text-foreground"], ["Resolved", diff.resolved, "text-success"],
-                    ["Regressed", diff.regressed, "text-destructive"], ["Other changes", diff.changed, "text-warning"]].map(([l, v, c]) => (
+                  {[['Total changes', diff.total_changes, 'text-foreground'], ['Resolved', diff.resolved, 'text-success'],
+                    ['Regressed', diff.regressed, 'text-destructive'], ['Other changes', diff.changed, 'text-warning']].map(([l, v, c]) => (
                     <div key={l} className="rounded-md border border-border bg-card p-3">
                       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{l}</div>
                       <div className={`mt-1 font-mono text-xl font-bold ${c}`}>{v}</div>
