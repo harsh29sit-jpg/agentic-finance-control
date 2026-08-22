@@ -1,5 +1,6 @@
 """JWT email/password auth + RBAC for the reconciliation platform."""
 import os
+import asyncio
 import jwt
 import bcrypt
 from datetime import datetime, timezone, timedelta
@@ -9,6 +10,10 @@ from bson import ObjectId
 from models import RegisterRequest, LoginRequest
 
 JWT_ALGORITHM = "HS256"
+
+# Self-service registration is limited to non-privileged roles.
+# controller/admin/compliance accounts are provisioned via seeds or by an admin.
+SELF_SERVICE_ROLES = ("analyst", "support")
 
 ROLE_LABELS = {
     "admin": "Administrator",
@@ -40,13 +45,28 @@ def create_access_token(user_id: str, email: str, role: str) -> str:
     return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
 
 
+def _cookie_secure():
+    return os.environ.get("COOKIE_SECURE", "true").lower() in ("1", "true", "yes")
+
+
 def _set_cookie(response: Response, token: str):
-    response.set_cookie("access_token", token, httponly=True, secure=True,
-                        samesite="none", max_age=43200, path="/")
+    response.set_cookie("access_token", token, httponly=True, secure=_cookie_secure(),
+                        samesite="none" if _cookie_secure() else "lax",
+                        max_age=43200, path="/")
 
 
-def build_auth_router(db):
+def build_auth_router(db, limiter=None):
     router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+    async def _rate_ok(request: Request, key_extra: str) -> bool:
+        """Shared, cross-instance rate limit (limiter may be sync or async)."""
+        if limiter is None:
+            return True
+        ip = request.client.host if request.client else "unknown"
+        result = limiter.allow(f"{ip}:{key_extra}", max_events=10, window_seconds=60)
+        if asyncio.iscoroutine(result):
+            result = await result
+        return bool(result)
 
     async def get_current_user(request: Request) -> dict:
         token = request.cookies.get("access_token")
@@ -73,13 +93,16 @@ def build_auth_router(db):
             raise HTTPException(status_code=401, detail="Invalid token")
 
     @router.post("/register")
-    async def register(body: RegisterRequest, response: Response):
+    async def register(body: RegisterRequest, request: Request, response: Response):
+        if not await _rate_ok(request, "register"):
+            raise HTTPException(status_code=429, detail="Too many attempts; retry shortly")
         email = body.email.lower()
+        role = body.role if body.role in SELF_SERVICE_ROLES else "analyst"
         if await db.users.find_one({"email": email}):
             raise HTTPException(status_code=400, detail="Email already registered")
-        role = body.role if body.role in ROLE_LABELS else "analyst"
         doc = {"email": email, "password_hash": hash_password(body.password),
-               "name": body.name, "role": role, "created_at": datetime.now(timezone.utc).isoformat()}
+               "name": body.name, "role": role,
+               "created_at": datetime.now(timezone.utc).isoformat()}
         res = await db.users.insert_one(doc)
         uid = str(res.inserted_id)
         token = create_access_token(uid, email, role)
@@ -87,7 +110,9 @@ def build_auth_router(db):
         return {"id": uid, "email": email, "name": body.name, "role": role, "token": token}
 
     @router.post("/login")
-    async def login(body: LoginRequest, response: Response):
+    async def login(body: LoginRequest, request: Request, response: Response):
+        if not await _rate_ok(request, body.email.lower()):
+            raise HTTPException(status_code=429, detail="Too many login attempts; retry shortly")
         email = body.email.lower()
         user = await db.users.find_one({"email": email})
         if not user or not verify_password(body.password, user["password_hash"]):

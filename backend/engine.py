@@ -30,10 +30,17 @@ def to_paise(v):
     if v is None or v == "":
         return 0
     s = str(v).replace(",", "").strip()
-    if "." in s:
-        # rupees with decimal -> paise
-        return int(round(float(s) * 100))
-    return int(s)
+    try:
+        if "." in s:
+            # rupees with decimal -> paise
+            p = round(float(s) * 100)
+        else:
+            p = int(s)
+    except (ValueError, OverflowError):
+        raise ValueError(f"unparseable amount: {v!r}")
+    if p < 0:
+        raise ValueError(f"negative amounts are not valid ledger entries: {v!r}")
+    return int(p)
 
 
 def tokenize_narration(text):

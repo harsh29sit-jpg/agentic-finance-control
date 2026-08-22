@@ -5,9 +5,9 @@ Build a modern agentic finance-ops web platform in the Razorpay Blade design sys
 
 ## Architecture
 - **Frontend:** React (CRA) + Tailwind (Blade tokens) + shadcn/ui + recharts + lucide. Pages: Login, Dashboard, Batches, Workbench, Exceptions, Reports, Audit, Copilot, Admin. Bearer-token auth in localStorage.
-- **Backend:** FastAPI. Modules: `engine.py` (normalization + 3-pass deterministic engine, integer paise), `agents.py` (Claude Sonnet 4.6 via emergentintegrations — triage, narration, reviewer, copilot; deterministic fallbacks), `auth.py` (JWT + RBAC), `seed_data.py` (demo ledger generator), `server.py` (all /api routes).
-- **DB:** MongoDB collections: users, batches, match_decisions, exception_cases, audit_events, model_invocations, policy_versions.
-- **AI:** Claude Sonnet 4.6 (EMERGENT_LLM_KEY). Agents never mutate final match state; all invocations logged.
+- **Backend:** FastAPI. Modules: `engine.py` (normalization + 3-pass deterministic engine, integer paise), `agents/` package (provider-agnostic LLM runtime — triage, narration, reviewer, copilot; typed output contracts, bounded self-repair, evidence verification, deterministic fallbacks), `auth.py` (JWT + RBAC), `seed_data.py` (demo ledger generator), `server.py` (all /api routes).
+- **DB:** MongoDB collections: users, batches, match_decisions, exception_cases, audit_events (hash-chained), model_invocations, policy_versions.
+- **AI:** provider-agnostic — ANTHROPIC_API_KEY or OPENAI_API_KEY; falls back to deterministic logic when no key is set. Agents never mutate final match state; all invocations logged with validation/verification metadata (`/api/agents/metrics`).
 
 ## User Personas & Roles (RBAC)
 - **Analyst** (maker): run batches, workbench review, exception triage/resolve.

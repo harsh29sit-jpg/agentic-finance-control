@@ -3,58 +3,64 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ------------------------------------------------------------------
+   Design tokens — Razorpay Blade lineage, refined.
+   Light: cool off-white canvas, white cards, hairline cool borders,
+   desaturated semantic colors. One hue family (220) everywhere except
+   the brand blue (206) and navy accent (213).
+   ------------------------------------------------------------------ */
 :root {
-  --background: 0 0% 100%;
-  --foreground: 218 54% 20%;
+  --background: 220 27% 98%;
+  --foreground: 219 56% 18%;
   --card: 0 0% 100%;
-  --card-foreground: 218 54% 20%;
+  --card-foreground: 219 56% 18%;
   --popover: 0 0% 100%;
-  --popover-foreground: 218 54% 20%;
+  --popover-foreground: 219 56% 18%;
   --primary: 206 97% 52%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 231 30% 96%;
-  --secondary-foreground: 213 98% 16%;
-  --muted: 231 20% 96%;
-  --muted-foreground: 218 17% 44%;
+  --secondary: 220 20% 96%;
+  --secondary-foreground: 219 56% 16%;
+  --muted: 220 20% 96%;
+  --muted-foreground: 220 12% 46%;
   --accent: 213 98% 16%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 12 91% 46%;
+  --destructive: 357 68% 51%;
   --destructive-foreground: 0 0% 100%;
-  --success: 153 96% 44%;
+  --success: 156 72% 37%;
   --success-foreground: 213 98% 12%;
-  --warning: 33 100% 56%;
+  --warning: 38 89% 48%;
   --warning-foreground: 213 98% 16%;
   --brand: 206 97% 52%;
-  --border: 231 14% 93%;
-  --input: 231 14% 88%;
+  --border: 220 15% 91%;
+  --input: 220 14% 87%;
   --ring: 206 97% 52%;
   --radius: 4px;
 }
 
 .dark {
-  --background: 220 61% 7%;
-  --foreground: 220 13% 96%;
-  --card: 222 47% 11%;
-  --card-foreground: 220 13% 96%;
-  --popover: 222 47% 11%;
-  --popover-foreground: 220 13% 96%;
+  --background: 222 47% 6%;
+  --foreground: 220 14% 95%;
+  --card: 221 41% 10%;
+  --card-foreground: 220 14% 95%;
+  --popover: 221 41% 10%;
+  --popover-foreground: 220 14% 95%;
   --primary: 206 97% 52%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 219 32% 16%;
-  --secondary-foreground: 220 13% 96%;
-  --muted: 219 32% 16%;
-  --muted-foreground: 218 13% 64%;
+  --secondary: 220 30% 15%;
+  --secondary-foreground: 220 14% 92%;
+  --muted: 220 30% 15%;
+  --muted-foreground: 218 12% 63%;
   --accent: 206 97% 52%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 12 80% 52%;
+  --destructive: 356 78% 60%;
   --destructive-foreground: 0 0% 100%;
-  --success: 153 80% 46%;
-  --success-foreground: 220 61% 7%;
-  --warning: 33 95% 58%;
-  --warning-foreground: 220 61% 7%;
+  --success: 156 64% 48%;
+  --success-foreground: 222 47% 6%;
+  --warning: 38 92% 56%;
+  --warning-foreground: 222 47% 6%;
   --brand: 206 97% 52%;
-  --border: 219 32% 16%;
-  --input: 219 32% 20%;
+  --border: 220 25% 16%;
+  --input: 220 24% 20%;
   --ring: 206 97% 52%;
 }
 
@@ -82,13 +88,21 @@ h1, h2, h3, h4 { letter-spacing: -0.02em; font-weight: 700; }
 
 ::selection { background: hsl(var(--brand)); color: #fff; }
 
-/* Thin, crisp scrollbars for a console feel */
-::-webkit-scrollbar { width: 10px; height: 10px; }
+/* Hairline scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.4); }
 
 .tabular { font-variant-numeric: tabular-nums; }
+
+/* Elevated card surface: hairline border + barely-there lift */
+.card-surface {
+  box-shadow: 0 1px 2px rgb(2 32 71 / 0.05);
+}
+.dark .card-surface {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}
 
 /* Dense table helpers */
 .recon-table th { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.03em; }

@@ -5,29 +5,17 @@ import PageHeader from "@/components/PageHeader";
 import MetricCard from "@/components/MetricCard";
 import { Button } from "@/components/ui/button";
 import { rupeesCompact, TAXONOMY_LABEL } from "@/lib/format";
-import { toast } from "sonner";
-import { Play } from "lucide-react";
+import { Layers } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from "recharts";
 
-const TAX_COLORS = ["#0d94fb", "#de350b", "#ff991f", "#012652", "#04db7c", "#5e6c84", "#8b5cf6"];
+const TAX_COLORS = ["#0d94fb", "#dc3d43", "#f2a01f", "#012652", "#17a56b", "#64748b", "#8b5cf6"];
 
 export default function Dashboard() {
   const [m, setM] = useState(null);
-  const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
 
   const load = () => api.get("/dashboard/metrics").then(({ data }) => setM(data)).catch(() => {});
   useEffect(() => { load(); }, []);
-
-  const runDemo = async () => {
-    setBusy(true);
-    try {
-      await api.post("/batches/run-demo");
-      toast.success("Batch reconciled");
-      await load();
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
-    finally { setBusy(false); }
-  };
 
   const trendSpark = (key) => (m?.trend || []).map((t) => t[key]);
   const taxData = m ? Object.entries(m.exceptions_by_taxonomy || {}).filter(([, v]) => v > 0)
@@ -38,16 +26,20 @@ export default function Dashboard() {
       <PageHeader
         title="Operations Dashboard"
         subtitle="High-signal reconciliation overview across all batches"
-        actions={<Button data-testid="run-demo-btn" onClick={runDemo} disabled={busy} className="h-9 gap-1.5 bg-brand text-white hover:bg-brand/90">
-          <Play size={15} /> {busy ? "Running…" : "Run Demo Batch"}</Button>}
       />
 
       {!m || m.total_batches === 0 ? (
         <div className="p-6">
-          <div className="rounded-md border border-dashed border-border p-12 text-center">
+          <div className="card-surface rounded-md border border-dashed border-border p-12 text-center">
             <p className="text-sm font-semibold">No batches reconciled yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">Run a demo batch to seed three ledgers (Source A/B/C) and execute the deterministic engine.</p>
-            <Button data-testid="empty-run-demo" onClick={runDemo} disabled={busy} className="mt-4 gap-1.5 bg-brand text-white hover:bg-brand/90"><Play size={15} /> Run Demo Batch</Button>
+            <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+              Ingest a CSV/JSON ledger set or a Razorpay settlements report to run the deterministic engine.
+              Sandbox fixtures (truth-labelled) are available to controller/admin roles.
+            </p>
+            <Button data-testid="goto-batches" onClick={() => navigate("/batches")}
+              className="mt-4 gap-1.5 bg-brand text-white hover:bg-brand/90">
+              <Layers size={15} /> Go to Batch Ingestion
+            </Button>
           </div>
         </div>
       ) : (
@@ -66,7 +58,7 @@ export default function Dashboard() {
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             {/* Exceptions by taxonomy */}
-            <div className="rounded-md border border-border bg-card p-4 lg:col-span-2">
+            <div className="card-surface rounded-md border border-border bg-card p-4 lg:col-span-2">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-bold">Open Exceptions by Taxonomy</h3>
                 <Button variant="ghost" size="sm" className="h-7 text-xs text-brand" onClick={() => navigate("/exceptions")}>View all →</Button>
@@ -87,7 +79,7 @@ export default function Dashboard() {
             </div>
 
             {/* Pass latency breakdown */}
-            <div className="rounded-md border border-border bg-card p-4">
+            <div className="card-surface rounded-md border border-border bg-card p-4">
               <h3 className="mb-3 text-sm font-bold">Latest Pass Latency</h3>
               <div className="space-y-2.5">
                 {[["Normalization", m.latency_ms?.normalization], ["Pass 1 · exact", m.latency_ms?.pass1],
@@ -95,7 +87,7 @@ export default function Dashboard() {
                   <div key={k}>
                     <div className="flex justify-between text-xs"><span className="text-muted-foreground">{k}</span><span className="font-mono">{v ?? 0}ms</span></div>
                     <div className="mt-1 h-1.5 rounded-full bg-secondary">
-                      <div className="h-1.5 rounded-full bg-brand" style={{ width: `${Math.min(100, (v || 0) / (m.latency_ms?.normalization || 1) * 100)}%` }} />
+                      <div className="h-1.5 rounded-full bg-brand/80" style={{ width: `${Math.min(100, (v || 0) / (m.latency_ms?.normalization || 1) * 100)}%` }} />
                     </div>
                   </div>
                 ))}
