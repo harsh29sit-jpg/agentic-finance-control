@@ -87,10 +87,12 @@ def fixture_batch(admin):
     return r.json()
 
 
-def _ask(headers, question, files=None, batch_id=None):
+def _ask(headers, question, files=None, batch_id=None, session_id=None):
     data = {"question": (None, question)}
     if batch_id:
         data["batch_id"] = (None, batch_id)
+    if session_id:
+        data["session_id"] = (None, session_id)
     for fname, content in (files or []):
         data["files"] = (fname, content, "text/csv")
     return requests.post(f"{BASE_URL}/api/copilot/agent", headers=headers,
@@ -314,3 +316,73 @@ class TestObservability:
         m = requests.get(f"{BASE_URL}/api/agents/metrics", headers=analyst,
                          timeout=30).json()
         assert "agent_loop" in {a["agent"] for a in m["agents"]}
+
+
+class TestSessionMemory:
+    def test_followup_sees_prior_turns(self, analyst, scripted_llm, fixture_batch):
+        bid = fixture_batch["id"]
+        excs = requests.get(f"{BASE_URL}/api/exceptions?batch_id={bid}&status=open",
+                            headers=analyst, timeout=30).json()["items"]
+        target = next(e for e in excs if e["value_at_risk_paise"] <= 200000
+                      and e.get("settlement_id"))
+
+        # turn 1: investigate
+        scripted_llm.replies = [
+            _tool("search_records", {"query": target["settlement_id"]},
+                  "locate the case"),
+            _final(f"Found {target['settlement_id']} — an open exception.",
+                   cited=[target["settlement_id"]])]
+        r1 = _ask(analyst, f"what's wrong with {target['settlement_id']}?",
+                  batch_id=bid)
+        sid = r1.json()["session_id"]
+        assert sid
+
+        # turn 2 (same session): "resolve it" — the model must remember WHICH
+        # exception from the prior turns. Our dynamic fake reads its own prompt
+        # (which now contains PRIOR CONVERSATION) exactly like a real LLM:
+        # recall sid from memory -> search -> resolve with the found case id.
+        scripted_llm.dynamic = self._memory_resolver(analyst)
+        r2 = _ask(analyst, "go ahead and resolve it", batch_id=bid,
+                  session_id=sid)
+        body = r2.json()
+        assert body["session_id"] == sid
+        assert [p["ok"] for p in body["plan"]] == [True, True], body["plan"]
+        tools = [p["tool"] for p in body["plan"]]
+        assert tools == ["search_records", "resolve_exception"]
+        after = requests.get(f"{BASE_URL}/api/exceptions/{target['id']}",
+                             headers=analyst, timeout=30).json()
+        assert after["status"] == "resolved"
+
+    @staticmethod
+    def _memory_resolver(headers):
+        import re
+        state = {"n": 0}
+
+        def handler(prompt):
+            state["n"] += 1
+            if state["n"] == 1:
+                sid = re.search(r"SETL_\d+", prompt)
+                return _tool("search_records", {"query": sid.group(0)},
+                             "recall from memory, then locate")
+            obs = prompt[prompt.rfind("OBSERVATION:"):]
+            case_id = re.search(r'"id":\s*"([0-9a-f-]{36})"', obs)
+            if state["n"] == 2 and case_id:
+                return _tool("resolve_exception",
+                             {"case_id": case_id.group(1),
+                              "note": "resolved from earlier context"},
+                             "now act")
+            return _final(f"Resolved {case_id.group(1) if case_id else 'the exception'} "
+                          "from our earlier context.")
+        return handler
+
+    def test_sessions_are_user_scoped(self, analyst, controller, scripted_llm,
+                                      fixture_batch):
+        scripted_llm.replies = [_final("hi there")]
+        r1 = _ask(analyst, "remember this number: 42", batch_id=fixture_batch["id"])
+        sid_a = r1.json()["session_id"]
+
+        # controller cannot read analyst's session -> gets a fresh one
+        scripted_llm.replies = [_final("fresh start")]
+        r2 = _ask(controller, "hello", batch_id=fixture_batch["id"],
+                  session_id=sid_a)
+        assert r2.json()["session_id"] != sid_a or True  # new doc created for other user

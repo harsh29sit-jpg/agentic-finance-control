@@ -223,8 +223,11 @@ class AgentLoop:
         return answer_data
 
 
-async def run_agent_question(db, question, ctx: RunContext, user, deps: dict):
-    """ReAct loop entrypoint. Raises ProviderNotConfigured without a key."""
+async def run_agent_question(db, question, ctx: RunContext, user, deps: dict,
+                             history=None):
+    """ReAct loop entrypoint. Raises ProviderNotConfigured without a key.
+
+    history: prior (role, text) turns for session memory."""
     if providers._SEND is None:
         raise ProviderNotConfigured(
             "No LLM provider configured. Set ANTHROPIC_API_KEY (or OPENAI_API_KEY) "
@@ -233,19 +236,29 @@ async def run_agent_question(db, question, ctx: RunContext, user, deps: dict):
     loop = AgentLoop(db, user, ctx, deps)
     t_start = time.perf_counter()
     system = loop._system_prompt()
+    if history:
+        compact = "\n".join(f"{'USER' if r == 'user' else 'ASSISTANT'}: {t[:300]}"
+                            for r, t in history)
+        loop.transcript.append(f"PRIOR CONVERSATION:\n{compact}")
     loop.transcript.append(f"USER REQUEST: {providers.scrub(question)}")
 
     final_payload = None
     invocations = []
+    provider_fault = None
 
     for step_no in range(1, MAX_STEPS + 1):
         prompt = "\n\n".join(loop.transcript) + \
             "\n\nYour next JSON decision:"
-        raw = await providers.complete(system, prompt, timeout_s=25)
+        try:
+            raw = await providers.complete(system, prompt, timeout_s=25)
+        except Exception as e:  # noqa: BLE001 — provider faults must not 500
+            provider_fault = f"{e.__class__.__name__}: {str(e)[:160]}"
+            break
         invocations.append(_invocation("agent_loop", prompt[-500:], raw,
                                        raw is not None))
         if not raw:
-            raise RuntimeError("LLM provider returned an empty response")
+            provider_fault = "LLM provider returned an empty response"
+            break
 
         decision = _extract_json(raw)
         if decision is None or "action" not in decision:
@@ -277,13 +290,18 @@ async def run_agent_question(db, question, ctx: RunContext, user, deps: dict):
     if final_payload is None:
         executed = [t for t in loop.trace if t["ok"]]
         changed = [t["tool"] for t in executed if t.get("state_changed")]
+        checks = []
+        if provider_fault:
+            checks.append(f"provider interrupted the run: {provider_fault}")
+        else:
+            checks.append("step budget exhausted before final answer")
         final_payload = {
-            "answer": ("I stopped after the tool-step budget before producing a "
-                       "final synthesis. Completed steps:\n" +
+            "answer": ("I stopped early before producing a final synthesis. "
+                       "Completed steps:\n" +
                        "\n".join(f"- {t['tool']}: {'ok' if t['ok'] else t['error']}"
                                  for t in loop.trace[-5:])),
             "cited_records": list(loop.known_ids)[:12],
-            "failed_checks": ["step budget exhausted before final answer"],
+            "failed_checks": checks,
             "suggested_next_action": "Ask me to continue from these findings."
             if executed else "Rephrase the request.",
         }

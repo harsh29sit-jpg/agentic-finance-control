@@ -916,12 +916,12 @@ async def copilot_agent(
     request: Request,
     question: str = Form(...),
     batch_id: str = Form(None),
+    session_id: str = Form(None),
     files: List[UploadFile] = File(None),
     user: dict = Depends(get_current_user),
 ):
-    """Agentic console entrypoint: plans read-only tool calls, executes them
-    against reconciled data, synthesizes a grounded answer. Supports up to 3
-    file attachments (bank statements become reconcile previews)."""
+    """Agentic console entrypoint: ReAct loop over read-only + action tools.
+    Supports up to 3 file attachments and multi-turn session memory."""
     question = (question or "").strip()
     if not 3 <= len(question) <= 2000:
         raise HTTPException(status_code=422, detail="Question must be 3–2000 characters")
@@ -948,9 +948,19 @@ async def copilot_agent(
     deps = {"process_batch": _process_batch, "generate_batch": generate_batch,
             "next_fire": next_fire}
 
+    # ---- session memory: load prior turns (compact) for this user's thread
+    session = None
+    history = []
+    if session_id:
+        session = await db.agent_sessions.find_one(
+            {"session_id": session_id, "user_id": user["id"]})
+        if session:
+            history = [(m["role"], m["text"]) for m in session.get("messages", [])[-8:]]
+
     try:
         payload, invocations = await run_agent_question(db, question, ctx,
-                                                        user=user, deps=deps)
+                                                        user=user, deps=deps,
+                                                        history=history)
     except ProviderNotConfigured as e:
         raise HTTPException(status_code=503, detail=str(e))
     for inv in invocations:
@@ -961,7 +971,22 @@ async def copilot_agent(
                      "tools": [p["tool"] for p in payload.get("plan", [])],
                      "state_changed": any(p.get("state_changed")
                                           for p in payload.get("plan", []))})
-    return {**payload, "batch_id": bid, "question": question}
+
+    # ---- persist the exchange
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    turn_user, turn_assistant = question[:500], payload.get("answer", "")[:500]
+    await db.agent_sessions.update_one(
+        {"session_id": session_id, "user_id": user["id"]},
+        {"$push": {"messages": {
+            "$each": [{"role": "user", "text": turn_user, "ts": now_iso()},
+                      {"role": "assistant", "text": turn_assistant, "ts": now_iso()}],
+            "$slice": -20}},
+         "$set": {"updated_at": now_iso()},
+         "$setOnInsert": {"created_at": now_iso()}},
+        upsert=True)
+    return {**payload, "batch_id": bid, "question": question,
+            "session_id": session_id}
 
 
 @api.post("/copilot/ask")
