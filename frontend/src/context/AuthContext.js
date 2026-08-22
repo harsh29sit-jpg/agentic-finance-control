@@ -30,13 +30,18 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     const { data } = await api.post("/auth/login", { email, password });
     localStorage.setItem("token", data.token);
+    if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
     setUser(data);
     return data;
   };
 
   const logout = async () => {
-    try { await api.post("/auth/logout"); } catch {}
+    try {
+      await api.post("/auth/logout",
+        { refresh_token: localStorage.getItem("refresh_token") });
+    } catch {}
     localStorage.removeItem("token");
+    localStorage.removeItem("refresh_token");
     setUser(false);
   };
 
