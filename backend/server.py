@@ -32,7 +32,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Request, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
@@ -67,6 +67,7 @@ APP_VERSION = "2.0.0"
 DEFAULT_POLICY = {"amount_tolerance_paise": 100, "timing_lag_days": 1, "auto_post_confidence": 0.95}
 import services as svc
 from services import GENESIS_HASH  # re-exported (tests + audit verifier)
+import metrics as metrics_mod
 
 APP_VERSION = "2.1.0"
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB guard rail
@@ -1099,10 +1100,23 @@ async def request_context(request: Request, call_next):
         logger.exception("[%s] %s %s failed", rid, request.method, request.url.path)
         response = JSONResponse(status_code=500,
                                 content={"detail": "Internal server error", "request_id": rid})
+    duration = time.perf_counter() - t0
     response.headers["X-Request-ID"] = rid
+    template = getattr(request.scope.get("route"), "path", request.url.path) \
+        if request.scope.get("route") else request.url.path
+    metrics_mod.record_request(request.method, template, response.status_code, duration)
+    if duration > metrics_mod.SLOW_REQUEST_S:
+        logger.warning("[%s] SLOW %s %s -> %d (%.0fms)", rid, request.method,
+                       template, response.status_code, duration * 1000)
     logger.info("[%s] %s %s -> %d (%.1fms)", rid, request.method, request.url.path,
-                response.status_code, (time.perf_counter() - t0) * 1000)
+                response.status_code, duration * 1000)
     return response
+
+
+@app.get("/api/metrics")
+async def prometheus_metrics():
+    """Prometheus scrape endpoint (unauthenticated; restrict at ingress in prod)."""
+    return Response(content=metrics_mod.render(), media_type="text/plain; version=0.0.4")
 
 
 app.include_router(auth_router)

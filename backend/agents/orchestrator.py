@@ -173,8 +173,13 @@ class AgentLoop:
             elif name in action_tools.ACTIONS:
                 res = await self._run_action_tool(name, args_dict)
             else:
-                return {"ok": False, "error": f"unknown tool {name!r}"}
+                res = {"ok": False, "error": f"unknown tool {name!r}"}
+                import metrics as _metrics_mod
+                _metrics_mod.record_agent_tool(name, False)
+                return res
             res["ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            import metrics as _metrics_mod
+            _metrics_mod.record_agent_tool(name, True, res.get("state_changed", False))
             return res
         except ValidationError as e:
             first = e.errors()[0]
