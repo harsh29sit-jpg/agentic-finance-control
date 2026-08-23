@@ -74,3 +74,12 @@ Still open before regulated production:
 ## 6. Test gates
 
 `cd backend && python -m pytest -q` must stay green (CI enforces on every push).
+
+## 7. Identity
+
+- **MFA**: TOTP (RFC 6238) per operator — enrol in Admin → Two-Factor
+  Authentication; 8 single-use recovery codes issued at enablement.
+- **SSO**: generic OIDC authorization-code flow. Configure
+  `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
+  `PUBLIC_BASE_URL`; grant admin via `SSO_ADMIN_EMAILS`. Unconfigured
+  tenants get a clean 501 and the password+MFA path remains primary.

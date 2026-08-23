@@ -18,6 +18,7 @@ import os
 import asyncio
 import base64
 import hashlib
+import hmac
 import secrets as pysecrets
 import jwt
 import bcrypt
@@ -396,6 +397,48 @@ def build_auth_router(db, limiter=None):
     @router.get("/me")
     async def me(user: dict = Depends(get_current_user)):
         return user
+
+    # ------------------------------------------------------------------ SSO
+    @router.get("/sso/config")
+    async def sso_config():
+        import sso as sso_mod
+        return {"enabled": sso_mod.sso_enabled()}
+
+    @router.get("/sso/login")
+    async def sso_login():
+        import sso as sso_mod
+        if not sso_mod.sso_enabled():
+            raise HTTPException(status_code=501,
+                                detail="SSO not configured (set OIDC_* and PUBLIC_BASE_URL)")
+        state = sso_mod.make_state()
+        url = sso_mod.authorize_url(sso_mod._discovery(), state)
+        response = Response(status_code=302)
+        response.headers["Location"] = url
+        response.set_cookie("sso_state", state, httponly=True,
+                            max_age=sso_mod.STATE_TTL_S, path="/",
+                            secure=os.environ.get("COOKIE_SECURE", "true").lower()
+                            in ("1", "true", "yes"))
+        return response
+
+    @router.get("/sso/callback")
+    async def sso_callback(request: Request, code: str = None, state: str = None):
+        import sso as sso_mod
+        if not sso_mod.sso_enabled():
+            raise HTTPException(status_code=501, detail="SSO not configured")
+        cookie_state = request.cookies.get("sso_state")
+        if not code or not state or not cookie_state or \
+                not hmac.compare_digest(state, cookie_state) or \
+                not sso_mod.verify_state(state):
+            raise HTTPException(status_code=400, detail="Invalid SSO state")
+        tokens = sso_mod.exchange_code(sso_mod._discovery(), code)
+        email = sso_mod.fetch_email(sso_mod._discovery(), tokens["access_token"])
+        if not email:
+            raise HTTPException(status_code=400, detail="IdP did not return an email")
+        uid, email, name, role = await sso_mod.upsert_sso_user(db, email)
+        access = create_access_token(uid, email, role)
+        refresh, _th = await _issue_refresh(db, uid)
+        return {"id": uid, "email": email, "name": name, "role": role,
+                "token": access, "refresh_token": refresh}
 
     router.get_current_user = get_current_user  # expose for reuse
     return router
