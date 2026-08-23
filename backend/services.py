@@ -223,10 +223,12 @@ async def rerun_batch(db, user, batch_id, process_batch_fn):
         rows, truth = generate_batch(seed=base["rerun_seed"])
         rerun_seed = base["rerun_seed"]
     else:
-        raw = await db.raw_files.find_one({"batch_id": batch_id})
-        if not raw:
+        cur = db.raw_files.find({"batch_id": batch_id}).sort("seq", 1)
+        rows, truth, rerun_seed = [], [], None
+        async for ch in cur:
+            rows.extend(ch.get("rows", []))
+        if not rows:
             raise ValueError("Original source rows unavailable for rerun")
-        rows, truth, rerun_seed = raw["rows"], [], None
     new = await process_batch_fn(
         f"{base['name']} (rerun {n_reruns + 1})", rows, user["email"], user["role"],
         base["source_label"], truth=truth, rerun_seed=rerun_seed,

@@ -70,7 +70,8 @@ from services import GENESIS_HASH  # re-exported (tests + audit verifier)
 import metrics as metrics_mod
 
 APP_VERSION = "2.1.0"
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB guard rail
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "50")) * 1024 * 1024
+MAX_UPLOAD_ROWS = int(os.environ.get("MAX_UPLOAD_ROWS", "250000"))
 AUDIT_PAYLOAD_KEYS = ("id", "batch_id", "actor", "role", "action",
                       "entity", "entity_id", "details", "created_at")
 
@@ -86,10 +87,17 @@ async def lifespan(_app):
     await db.batches.create_index("created_at")
     await db.batches.create_index("parent_batch_id")
     await db.batches.create_index("source_fingerprint")
-    await db.raw_files.create_index("batch_id", unique=True)
+    await db.raw_files.create_index([("batch_id", 1), ("seq", 1)])
+    # migration: pre-chunking schema had a UNIQUE batch_id index which breaks
+    # multi-chunk storage; drop it when encountered (idempotent)
+    raw_indexes = await db.raw_files.index_information()
+    if "batch_id_1" in raw_indexes and raw_indexes["batch_id_1"].get("unique"):
+        await db.raw_files.drop_index("batch_id_1")
+        logger.info("dropped legacy unique raw_files.batch_id index")
     await db.exception_cases.create_index([("batch_id", 1), ("status", 1)])
     await db.exception_cases.create_index([("batch_id", 1), ("taxonomy", 1)])
     await db.exception_cases.create_index("status")
+    await db.exception_cases.create_index([("value_at_risk_paise", -1)])
     await db.match_decisions.create_index([("batch_id", 1), ("settlement_id", 1)])
     await db.match_decisions.create_index([("batch_id", 1), ("status", 1)])
     await db.audit_events.create_index([("batch_id", 1), ("created_at", -1)])
@@ -270,8 +278,13 @@ async def _process_batch(name, rows, actor, role, source_label, truth=None,
     if exceptions:
         await db.exception_cases.insert_many([dict(e) for e in exceptions])
     if save_rows is not None:
-        await db.raw_files.insert_one({"batch_id": batch_id, "rows": save_rows,
-                                       "created_at": t0})
+        # store uploads in bounded chunks: a single doc would blow the
+        # 16MB BSON ceiling on large ledgers
+        CHUNK = 20_000
+        for seq_no, i in enumerate(range(0, len(save_rows), CHUNK)):
+            await db.raw_files.insert_one({
+                "batch_id": batch_id, "seq": seq_no,
+                "rows": save_rows[i:i + CHUNK], "created_at": t0})
     await db.batches.insert_one(dict(batch))
 
     batch.pop("_id", None)
@@ -347,8 +360,9 @@ async def upload_batch(
         rows = [dict(r) for r in reader]
     if not rows:
         raise HTTPException(status_code=400, detail="No records found in file")
-    if len(rows) > 100_000:
-        raise HTTPException(status_code=413, detail="Row count exceeds 100k limit; split the file")
+    if len(rows) > MAX_UPLOAD_ROWS:
+        raise HTTPException(status_code=413,
+                            detail=f"Row count exceeds {MAX_UPLOAD_ROWS:,} limit; split the file")
 
     batch = await _process_batch(name, rows, user["email"], user["role"], f"upload:{file.filename}",
                                  save_rows=rows, source_fingerprint=fingerprint)
