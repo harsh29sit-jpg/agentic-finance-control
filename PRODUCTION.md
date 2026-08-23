@@ -83,3 +83,20 @@ Still open before regulated production:
   `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
   `PUBLIC_BASE_URL`; grant admin via `SSO_ADMIN_EMAILS`. Unconfigured
   tenants get a clean 501 and the password+MFA path remains primary.
+
+## 8. Connector credentials & scheduled pulls
+
+Razorpay API keys live encrypted-at-rest (AES-GCM, key derived from
+JWT_SECRET) in the `vault_secrets` collection — never plaintext, never in
+logs. Swap `vault.get_store()` for a HashiCorp Vault client to upgrade.
+
+```bash
+# store (controller/admin)
+curl -X PUT .../api/integrations/razorpay/credentials \
+  -d '{"key_id":"rzp_live_...","key_secret":"..."}'
+# pull now
+curl -X POST .../api/integrations/razorpay/sync -d '{"hours_back":24}'
+```
+
+Or schedule it: Admin → Batch Schedules → action `razorpay_sync`
+(e.g. `30 */4 * * *` pulls every 4 hours; identical windows dedupe).

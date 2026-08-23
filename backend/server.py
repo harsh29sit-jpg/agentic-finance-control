@@ -39,7 +39,8 @@ from pymongo import ReturnDocument
 from pymongo.errors import BulkWriteError, DuplicateKeyError
 
 from models import (ReviewAction, ExceptionReviewAction, OverrideDecision, CopilotAsk,
-                    PolicyUpdate, TAXONOMY, ROLES, BulkReview, ScheduleCreate)
+                    PolicyUpdate, TAXONOMY, ROLES, BulkReview, ScheduleCreate,
+                    RazorpayCredentials)
 from typing import List
 from engine import run_reconciliation, compute_benchmark, diff_batches
 from seed_data import generate_batch
@@ -129,8 +130,14 @@ async def lifespan(_app):
             f"replay:{base['source_label']}", parent_batch_id=base["id"],
             sandbox=bool(base.get("sandbox")))
 
+    async def _job_razorpay_sync(actor="scheduler@system", trigger="schedule",
+                                 schedule=None):
+        return await _razorpay_sync_core({"email": actor, "role": "admin"},
+                                         hours_back=24)
+
     scheduler_service.configure({"sandbox_seed": _job_sandbox_seed,
-                                 "replay_latest_upload": _job_replay_latest})
+                                 "replay_latest_upload": _job_replay_latest,
+                                 "razorpay_sync": _job_razorpay_sync})
     await scheduler_service.start()
 
     logger.info("Startup complete: indexes ensured, users + policy seeded, scheduler running")
@@ -1053,6 +1060,112 @@ async def create_policy(body: PolicyUpdate,
 @api.get("/meta/roles")
 async def meta_roles(user: dict = Depends(get_current_user)):
     return {"roles": ROLES, "labels": ROLE_LABELS, "taxonomy": TAXONOMY}
+
+
+# ------------------------------------------------------------------ integrations
+RAZORPAY_SECRET_NAME = "razorpay_api"
+
+
+def _vault():
+    from vault import get_store
+    return get_store(db)
+
+
+def _mask(key_id: str):
+    return key_id[:6] + "…" + key_id[-3:] if len(key_id) > 10 else key_id[:4] + "…"
+
+
+@api.put("/integrations/razorpay/credentials")
+async def set_razorpay_credentials(body: RazorpayCredentials,
+                                   user: dict = Depends(require_roles(get_current_user, "controller", "admin"))):
+    vault = _vault()
+    await vault.put(RAZORPAY_SECRET_NAME,
+                    json.dumps({"key_id": body.key_id,
+                                "key_secret": body.key_secret}))
+    await audit_log(None, user["email"], user["role"], "credentials_updated",
+                    "integration", RAZORPAY_SECRET_NAME,
+                    {"key_id": _mask(body.key_id)})
+    return {"ok": True, "key_id_masked": _mask(body.key_id)}
+
+
+@api.get("/integrations/razorpay/credentials")
+async def get_razorpay_credentials(user: dict = Depends(require_roles(get_current_user, "controller", "admin"))):
+    raw = await _vault().get(RAZORPAY_SECRET_NAME)
+    if not raw:
+        return {"configured": False}
+    key_id = json.loads(raw).get("key_id", "")
+    return {"configured": True, "key_id_masked": _mask(key_id)}
+
+
+@api.delete("/integrations/razorpay/credentials")
+async def delete_razorpay_credentials(user: dict = Depends(require_roles(get_current_user, "controller", "admin"))):
+    await _vault().delete(RAZORPAY_SECRET_NAME)
+    await audit_log(None, user["email"], user["role"], "credentials_deleted",
+                    "integration", RAZORPAY_SECRET_NAME, {})
+    return {"ok": True}
+
+
+async def _razorpay_sync_core(user: dict, hours_back: int = 24):
+    """Pull fresh settlements from the Razorpay API using vaulted creds and
+    reconcile them as one batch. Raises on missing credentials."""
+    from connectors import razorpay_api as rzapi
+    raw = await _vault().get(RAZORPAY_SECRET_NAME)
+    if not raw:
+        raise LookupError("Razorpay credentials not configured")
+    creds = json.loads(raw)
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    transport = getattr(rzapi, "_transport_override", None)
+    rows = rzapi.fetch_settlements(
+        creds["key_id"], creds["key_secret"],
+        from_ts=now_ts - hours_back * 3600, to_ts=now_ts,
+        transport=transport)
+    if not rows:
+        return {"ok": True,
+                "message": "No settled settlements in the requested window",
+                "batch": None}
+    fingerprint = hashlib.sha256(
+        json.dumps(rows, sort_keys=True).encode()).hexdigest()
+
+    # idempotent syncs: identical content short-circuits to the original batch
+    existing = await db.batches.find_one(
+        {"source_fingerprint": fingerprint},
+        {"_id": 0, "id": 1, "name": 1, "created_at": 1})
+    if existing:
+        await audit_log(None, user["email"], user.get("role", "admin"),
+                        "sync_deduplicated", "batch", existing["id"],
+                        {"fingerprint": fingerprint[:16]})
+        return {**existing, "deduplicated": True}
+
+    batch = await _process_batch(
+        f"Razorpay API sync ({len(rows)} settlements)", rows,
+        user["email"], user.get("role", "admin"), "connector:razorpay-api",
+        save_rows=rows, source_fingerprint=fingerprint)
+    await audit_log(batch["id"], user["email"], user["role"], "batch_created",
+                    "batch", batch["id"],
+                    {"source": "connector:razorpay-api", "hours_back": hours_back})
+    return batch
+
+
+@api.post("/integrations/razorpay/sync")
+async def sync_razorpay_settlements(request: Request,
+                                    user: dict = Depends(require_roles(get_current_user, "analyst", "controller", "admin"))):
+    try:
+        body = await request.json() or {}
+    except Exception:  # noqa: BLE001 — empty body ok
+        body = {}
+    hours = min(max(int(body.get("hours_back", 24)), 1), 24 * 31)
+    try:
+        batch = await _razorpay_sync_core(user, hours_back=hours)
+    except LookupError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:  # noqa: BLE001 — upstream API faults surface clearly
+        raise HTTPException(status_code=502,
+                            detail=f"Razorpay sync failed: {str(e)[:200]}")
+    await audit_log(batch["id"], user["email"], user["role"], "batch_created",
+                    "batch", batch["id"],
+                    {"source": "connector:razorpay-api", "hours_back": hours})
+    return batch
 
 
 # ------------------------------------------------------------------ schedules

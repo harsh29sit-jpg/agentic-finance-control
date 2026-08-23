@@ -67,9 +67,15 @@ class ScheduleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     cron: str = Field(min_length=9, max_length=100,
                       description="Standard 5-field cron: min hour day-of-month month day-of-week (UTC)")
-    action: Literal["replay_latest_upload", "sandbox_seed"]
+    action: Literal["replay_latest_upload", "sandbox_seed", "razorpay_sync"]
     enabled: bool = True
     note: Optional[str] = Field(default="", max_length=300)
+
+
+# ---- Connector credentials ----
+class RazorpayCredentials(BaseModel):
+    key_id: str = Field(min_length=4, max_length=80)
+    key_secret: str = Field(min_length=8, max_length=200)
 
 
 # ---- Roles / RBAC ----
