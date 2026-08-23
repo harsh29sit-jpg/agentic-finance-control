@@ -108,3 +108,17 @@ h1, h2, h3, h4 { letter-spacing: -0.02em; font-weight: 700; }
 .recon-table th { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.03em; }
 .recon-table td, .recon-table th { padding: 6px 12px; }
 .recon-table tbody tr:hover { background: hsl(var(--secondary)); }
+
+/* Dense markdown for agent answers (console aesthetic) */
+.md-console { font-size: 12.5px; line-height: 1.55; }
+.md-console p { margin: 0 0 6px; }
+.md-console p:last-child { margin-bottom: 0; }
+.md-console strong { font-weight: 700; color: hsl(var(--foreground)); }
+.md-console table { border-collapse: collapse; margin: 6px 0; width: auto; }
+.md-console th, .md-console td { border: 1px solid hsl(var(--border)); padding: 3px 8px; text-align: left; }
+.md-console th { background: hsl(var(--secondary)); font-size: 10px; text-transform: uppercase; letter-spacing: .03em; }
+.md-console code { background: hsl(var(--secondary)); padding: 1px 4px; border-radius: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+.md-console pre { background: hsl(var(--secondary)); padding: 8px; border-radius: 4px; overflow-x: auto; margin: 6px 0; }
+.md-console ul, .md-console ol { margin: 4px 0 6px; padding-left: 18px; }
+.md-console li { margin: 2px 0; }
+.md-console blockquote { border-left: 2px solid hsl(var(--brand)); margin: 6px 0; padding-left: 8px; color: hsl(var(--muted-foreground)); }

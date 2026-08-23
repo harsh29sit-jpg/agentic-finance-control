@@ -21,6 +21,7 @@ export default function Workbench() {
   const [params, setParams] = useSearchParams();
   const [batches, setBatches] = useState([]);
   const [batchId, setBatchId] = useState(params.get("batch") || "");
+  const [qref, setQref] = useState(params.get("q") || "");
   const [rows, setRows] = useState([]);
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState(null);
@@ -38,7 +39,13 @@ export default function Workbench() {
     api.get(`/reconciliation?batch_id=${batchId}&limit=2000`).then(({ data }) => setRows(data));
   }, [batchId]);
 
-  useEffect(() => { if (batchId) { setParams({ batch: batchId }); load(); } }, [batchId, load, setParams]);
+  useEffect(() => {
+    if (!batchId) return;
+    const next = { batch: batchId };
+    if (qref) next.q = qref;
+    setParams(next);
+    load();
+  }, [batchId, load, setParams, qref]);
 
   const review = async (action, note) => {
     setBusy(true);
@@ -49,7 +56,11 @@ export default function Workbench() {
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); } finally { setBusy(false); }
   };
 
-  const filtered = rows.filter((r) => filter === "all" || r.status === filter);
+  const filtered = rows.filter(
+    (r) => (filter === "all" || r.status === filter) &&
+      (!qref ||
+        [r.settlement_id, r.utr, r.merchant_id].some(
+          (v) => v && v.toLowerCase().includes(qref.toLowerCase()))));
   const vw = useVirtualWindow({ itemCount: filtered.length, rowHeight: ROW_H });
   const visible = filtered.slice(vw.start, vw.end);
   const summary = {
@@ -67,7 +78,13 @@ export default function Workbench() {
         <span><b className="font-mono text-success">{summary.matched}</b> matched</span>
         <span><b className="font-mono text-brand">{summary.pending}</b> pending review</span>
         <span><b className="font-mono">{summary.total}</b> settlements</span>
-        <div className="ml-auto flex gap-1">
+        {qref && (
+          <span data-testid="qref-chip" className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-brand">
+            ref: {qref}
+            <button onClick={() => setQref("")} className="hover:text-destructive">×</button>
+          </span>
+        )}
+        <div className={`${qref ? "" : "ml-auto "}flex gap-1`}>
           {["all", "matched", "pending_review"].map((f) => (
             <button key={f} data-testid={`filter-${f}`} onClick={() => setFilter(f)}
               className={`rounded px-2.5 py-1 text-xs font-semibold ${filter === f ? "bg-brand text-white" : "border border-border hover:bg-secondary"}`}>

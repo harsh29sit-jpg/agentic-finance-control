@@ -85,3 +85,12 @@ found two gaps; both fixed and verified:
 New startup indexes: `match_decisions {batch_id,status,amount desc}`,
 `{batch_id, amount desc}`, `{id}`. Rerun the report anytime — it samples
 the largest real batch so numbers reflect production-like selectivity.
+
+## Agent console UX (Item D)
+
+- Rich markdown answers (tables/lists/code) via react-markdown + GFM,
+  styled to the dense console aesthetic — both console and popup widget
+- Stop button (AbortController) kills in-flight agent runs
+- Copy-answer button; ⚡ chips mark state-changing plan steps
+- Citation chips deep-link to `/workbench?q=<ref>` which live-filters the
+  virtualized table and shows a removable ref chip

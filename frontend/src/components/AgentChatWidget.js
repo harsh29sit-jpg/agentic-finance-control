@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Sparkles, X, Minus, Paperclip, SendHorizonal, FileText,
-  Loader2, Zap, Quote,
+  Loader2, Zap, CircleStop,
 } from "lucide-react";
 
 const KIND_LABEL = {
@@ -20,6 +22,7 @@ export default function AgentChatWidget() {
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const [unread, setUnread] = useState(0);
+  const abortRef = useRef(null);
   const scrollRef = useRef();
   const fileRef = useRef();
 
@@ -41,25 +44,37 @@ export default function AgentChatWidget() {
     const sentFiles = files;
     setFiles([]);
     setMessages((m) => [...m, { role: "user", text: q, files: sentFiles }]);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const fd = new FormData();
       fd.append("question", q);
       sentFiles.forEach((f) => fd.append("files", f));
       const { data } = await api.post("/copilot/agent", fd,
-        { headers: { "Content-Type": "multipart/form-data" }, timeout: 180000 });
+        { headers: { "Content-Type": "multipart/form-data" }, timeout: 240000,
+          signal: controller.signal });
       setMessages((m) => [...m, { role: "assistant", data }]);
       if (!open) setUnread((u) => u + 1);
     } catch (err) {
-      setMessages((m) => [...m, { role: "assistant", error:
-        err.response?.status === 503
-          ? "Agent LLM not configured — add ANTHROPIC_API_KEY to backend/.env and restart."
-          : err.response?.data?.detail || "Agent run failed" }]);
-    } finally { setBusy(false); }
+      if (err.name === "CanceledError" || err.code === "ERR_CANCELED") {
+        setMessages((m) => [...m, { role: "assistant", error: "Run stopped." }]);
+      } else {
+        setMessages((m) => [...m, { role: "assistant", error:
+          err.response?.status === 503
+            ? "Agent LLM not configured — add ANTHROPIC_API_KEY (or CUSTOM_LLM_*) to backend/.env and restart."
+            : err.response?.data?.detail || "Agent run failed" }]);
+      }
+    } finally {
+      setBusy(false);
+      abortRef.current = null;
+    }
   };
+
+  const stop = () => abortRef.current?.abort();
 
   const cite = (ref) => {
     navigator.clipboard?.writeText(ref).catch(() => {});
-    navigate("/workbench");
+    navigate(`/workbench?q=${encodeURIComponent(ref)}`);
   };
 
   return (
@@ -156,7 +171,9 @@ export default function AgentChatWidget() {
                           ))}
                         </div>
                         <div className="px-2.5 py-2">
-                          <p className="whitespace-pre-wrap text-xs leading-relaxed">{msg.data.answer}</p>
+                          <div className="md-console">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.data.answer}</ReactMarkdown>
+                          </div>
                           {!!msg.data.cited_records?.length && (
                             <div className="mt-1.5 flex flex-wrap gap-1">
                               {msg.data.cited_records.map((c, j) => (
@@ -228,10 +245,17 @@ export default function AgentChatWidget() {
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                 placeholder="Ask or instruct…"
                 className="max-h-24 min-h-[32px] flex-1 resize-none rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-brand" />
-              <button data-testid="widget-send" onClick={() => send()} disabled={busy || input.trim().length < 3}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand text-white hover:bg-brand/90 disabled:opacity-40">
-                <SendHorizonal size={13} />
-              </button>
+              {busy ? (
+                <button data-testid="widget-stop" onClick={stop}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-destructive text-white hover:bg-destructive/90">
+                  <CircleStop size={13} />
+                </button>
+              ) : (
+                <button data-testid="widget-send" onClick={() => send()} disabled={input.trim().length < 3}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand text-white hover:bg-brand/90 disabled:opacity-40">
+                  <SendHorizonal size={13} />
+                </button>
+              )}
             </div>
           </div>
         </div>

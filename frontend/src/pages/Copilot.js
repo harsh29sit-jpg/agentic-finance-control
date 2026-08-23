@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Sparkles, Paperclip, SendHorizonal, FileText, Wrench, Check, X,
-  CornerDownLeft, Copy, Loader2, Quote,
+  CornerDownLeft, Copy, Loader2, Quote, Square, CircleStop, Zap,
 } from "lucide-react";
 
 const EXAMPLES = [
@@ -29,6 +31,8 @@ export default function Copilot() {
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState(null);
+  const abortRef = useRef(null);
+  const [copiedIdx, setCopiedIdx] = useState(null);
   const scrollRef = useRef();
   const fileRef = useRef();
 
@@ -56,14 +60,20 @@ export default function Copilot() {
     const sentFiles = files;
     setFiles([]);
     setMessages((m) => [...m, { role: "user", text: q, files: sentFiles }]);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const fd = new FormData();
       fd.append("question", q);
       sentFiles.forEach((f) => fd.append("files", f));
       const { data } = await api.post("/copilot/agent", fd,
-        { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 });
+        { headers: { "Content-Type": "multipart/form-data" }, timeout: 240000,
+          signal: controller.signal });
       setMessages((m) => [...m, { role: "assistant", data }]);
     } catch (err) {
+      if (err.name === "CanceledError" || err.code === "ERR_CANCELED") {
+        setMessages((m) => [...m, { role: "assistant", error: "Run stopped." }]);
+      } else
       setMessages((m) => [...m, { role: "assistant", error:
         err.response?.data?.detail || "Agent run failed" }]);
     } finally {
@@ -73,7 +83,7 @@ export default function Copilot() {
 
   const cite = (ref) => {
     navigator.clipboard?.writeText(ref).catch(() => {});
-    navigate(`/workbench`);
+    navigate(`/workbench?q=${encodeURIComponent(ref)}`);
   };
 
   return (
@@ -154,11 +164,17 @@ export default function Copilot() {
               placeholder="Ask the agent — e.g. 'reconcile the attached statement' or 'why are exceptions spiking?'"
               className="max-h-32 min-h-[36px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand"
             />
-            <button data-testid="copilot-send" onClick={() => send()} disabled={busy || input.trim().length < 3}
-              className="flex h-9 items-center gap-1.5 rounded-md bg-brand px-3.5 text-sm font-semibold text-white transition-opacity hover:bg-brand/90 disabled:opacity-40">
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <SendHorizonal size={14} />}
-              Run
-            </button>
+            {busy ? (
+              <button data-testid="copilot-stop" onClick={stop}
+                className="flex h-9 items-center gap-1.5 rounded-md bg-destructive px-3.5 text-sm font-semibold text-white hover:bg-destructive/90">
+                <CircleStop size={14} /> Stop
+              </button>
+            ) : (
+              <button data-testid="copilot-send" onClick={() => send()} disabled={input.trim().length < 3}
+                className="flex h-9 items-center gap-1.5 rounded-md bg-brand px-3.5 text-sm font-semibold text-white transition-opacity hover:bg-brand/90 disabled:opacity-40">
+                <SendHorizonal size={14} /> Run
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -189,7 +205,19 @@ const UserRow = ({ msg }) => (
   </div>
 );
 
+const Md = ({ text }) => (
+  <div className="md-console">
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+  </div>
+);
+
 const AssistantRow = ({ msg, onCite }) => {
+  const [copied, setCopied] = useState(false);
+  const copyAnswer = () => {
+    navigator.clipboard?.writeText(msg.data?.answer || "").catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
   if (msg.error) {
     return (
       <div className="mb-4 max-w-[85%] rounded-md border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-sm text-destructive">
@@ -217,7 +245,12 @@ const AssistantRow = ({ msg, onCite }) => {
       </div>
 
       <div className="px-3.5 py-3">
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">{d.answer}</p>
+        <Md text={d.answer} />
+        <button onClick={copyAnswer}
+          title="Copy answer"
+          className="mt-1 inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:border-brand hover:text-brand">
+          {copied ? <Check size={8} /> : <Copy size={8} />} {copied ? "copied" : "copy"}
+        </button>
 
         {!!d.cited_records?.length && (
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
