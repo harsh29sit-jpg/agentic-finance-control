@@ -28,8 +28,9 @@ def _prune(dirpath: Path, keep: int):
         print(f"pruned {old.name}")
 
 
-def _mongodump(uri, dbname, out: Path):
-    cmd = ["mongodump", f"--uri={uri}", f"--db={dbname}", f"--out={out}"]
+def _mongodump(uri, dbname, out: Path, extra=None):
+    cmd = ["mongodump", f"--uri={uri}", f"--db={dbname}", *(
+        extra or []), f"--out={out}"]
     subprocess.run(cmd, check=True)
     return True
 
@@ -56,22 +57,48 @@ def main():
     ap.add_argument("--keep", type=int, default=14, help="retention count")
     ap.add_argument("--uri", default=os.environ.get("MONGO_URL", "mongodb://localhost:27017"))
     ap.add_argument("--db", default=os.environ.get("DB_NAME", "recon_control_tower"))
+    ap.add_argument("--gzip", action="store_true", help="mongodump --gzip")
+    ap.add_argument("--s3", default=os.environ.get("BACKUP_S3_BUCKET", ""),
+                    help="off-box push target: s3://bucket/prefix (boto3)")
     args = ap.parse_args()
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     out = Path(args.out) / stamp
     out.mkdir(parents=True, exist_ok=True)
 
+    dump_args = [f"--out={out}"]
+    if args.gzip:
+        dump_args.append("--gzip")
+        # mongodump --gzip writes per-db subdirs; keep --out as-is
     try:
-        _mongodump(args.uri, args.db, out)
-        mode = "mongodump"
+        _mongodump(args.uri, args.db, out, dump_args)
+        mode = "mongodump" + ("+gzip" if args.gzip else "")
     except (FileNotFoundError, subprocess.CalledProcessError):
-        print("mongodump unavailable — JSON fallback")
+        print("mongodump unavailable — JSON fallback (gzip ignored)")
         _json_fallback(args.uri, args.db, out)
         mode = "json"
 
     print(f"backup complete [{mode}] -> {out}")
+
+    if args.s3:
+        _push_s3(out, args.s3)
+
     _prune(Path(args.out), args.keep)
+
+
+def _push_s3(local_dir: Path, s3_target: str):
+    """Upload the run to s3://bucket/prefix/stamp/ (server-side copy of tree)."""
+    import boto3  # optional dependency
+
+    bucket, _, prefix = s3_target.replace("s3://", "").partition("/")
+    s3 = boto3.client("s3")
+    uploaded = 0
+    for p in sorted(local_dir.rglob("*")):
+        if p.is_file():
+            key = f"{prefix.rstrip('/')}/{local_dir.name}/{p.relative_to(local_dir)}"
+            s3.upload_file(str(p), bucket, key)
+            uploaded += 1
+    print(f"off-box push: {uploaded} objects -> s3://{bucket}/{prefix}/{local_dir.name}")
 
 
 if __name__ == "__main__":

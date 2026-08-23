@@ -1,0 +1,118 @@
+# Production topology — authenticated, TLS'd Mongo replica set + backup sidecar.
+#
+# Prereqs:
+#   scripts/gen_mongo_tls.sh ./mongo-tls        (dev certs; use real PKI in prod)
+#   .env with: JWT_SECRET, MONGO_APP_PASSWORD, MONGO_BACKUP_PASSWORD,
+#              AWS credentials for off-box push (optional), LLM key(s)
+#   mongo keyfile:  openssl rand -base64 756 > mongo-keyfile && chmod 400
+
+services:
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    command:
+      - --replSet
+      - rs0
+      - --auth
+      - --keyFile
+      - /etc/mongo/keyfile
+      - --tlsMode
+      - requireTLS
+      - --tlsCertificateKeyFile
+      - /etc/mongo/tls/mongo.pem
+      - --tlsCAFile
+      - /etc/mongo/tls/ca.pem
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?}
+      DB_NAME: recon_control_tower
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?}
+      MONGO_BACKUP_PASSWORD: ${MONGO_BACKUP_PASSWORD:?}
+    volumes:
+      - mongo-data:/data/db
+      - ./mongo-tls:/etc/mongo/tls:ro
+      - ./mongo-keyfile:/etc/mongo/keyfile:ro
+      - ./scripts/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    healthcheck:
+      test: >
+        mongosh --quiet --tls --tlsCAFile /etc/mongo/tls/ca.pem
+        --host localhost -u root -p "$$MONGO_INITDB_ROOT_PASSWORD"
+        --authenticationDatabase admin --eval "db.adminCommand('ping')"
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+  # single-node replica-set initialisation (transactions need a replica set)
+  mongo-init:
+    image: mongo:7.0
+    depends_on:
+      mongo:
+        condition: service_started
+    entrypoint: >
+      bash -c 'sleep 12; mongosh --quiet --tls --tlsCAFile /etc/mongo/tls/ca.pem
+      --eval "rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongo:27017\"}]})"
+      || true; sleep 5'
+    volumes:
+      - ./mongo-tls:/etc/mongo/tls:ro
+    restart: "no"
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGO_URL: mongodb://recon_app:${MONGO_APP_PASSWORD}@mongo:27017/recon_control_tower?authSource=recon_control_tower&tls=true&tlsCAFile=/app/mongo-tls/ca.pem&replicaSet=rs0&retryWrites=true
+      DB_NAME: recon_control_tower
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      COOKIE_SECURE: "true"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CUSTOM_LLM_BASE_URL: ${CUSTOM_LLM_BASE_URL:-}
+      CUSTOM_LLM_API_KEY: ${CUSTOM_LLM_API_KEY:-}
+      CUSTOM_LLM_MODEL: ${CUSTOM_LLM_MODEL:-}
+    volumes:
+      - ./mongo-tls:/app/mongo-tls:ro
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+  # nightly off-box backups: dump -> gzip -> S3 (or any rclone remote)
+  backup:
+    image: python:3.12-slim
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      MONGO_URL: mongodb://recon_backup:${MONGO_BACKUP_PASSWORD}@mongo:27017/?authSource=admin&tls=true&tlsCAFile=/mnt/tls/ca.pem
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_KEEP_LOCAL: "7"
+    volumes:
+      - ./scripts/backup_db.py:/opt/backup_db.py:ro
+      - ./mongo-tls:/mnt/tls:ro
+      - backups:/backups
+      # boto3 + mongodb-tools baked via a tiny wrapper below
+    entrypoint:
+      bash -c 'pip install --quiet pymongo boto3 dnspython &&
+               (command -v mongodump >/dev/null || apt-get update -qq && apt-get install -y -qq mongodb-database-tools >/dev/null 2>&1 || true) &&
+               while true; do
+                 python /opt/backup_db.py --uri "$$MONGO_URL" --db recon_control_tower \
+                   --out /backups --keep "$$BACKUP_KEEP_LOCAL" --gzip --s3 "$$BACKUP_S3_BUCKET" || true;
+                 sleep 86400;
+               done'
+
+volumes:
+  mongo-data:
+  backups:

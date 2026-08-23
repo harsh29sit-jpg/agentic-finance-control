@@ -17,20 +17,35 @@ DEMO_SEEDS=false                        # never ship seeded passwords
 LLM key for the agent: `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
 `CUSTOM_LLM_BASE_URL` + `CUSTOM_LLM_API_KEY` + `CUSTOM_LLM_MODEL`.
 
-## 2. Deploy
+## 2. Deploy (authenticated + TLS'd Mongo)
 
 ```bash
-JWT_SECRET=... ANTHROPIC_API_KEY=... docker compose up --build -d
+scripts/gen_mongo_tls.sh ./mongo-tls            # dev certs; use real PKI in prod
+openssl rand -base64 756 > mongo-keyfile && chmod 400 mongo-keyfile
+
+cat > .env <<ENV
+JWT_SECRET=$(openssl rand -hex 32)
+MONGO_ROOT_PASSWORD=...
+MONGO_APP_PASSWORD=...
+MONGO_BACKUP_PASSWORD=...
+ANTHROPIC_API_KEY=...            # agent brain
+BACKUP_S3_BUCKET=s3://your-co-recon-backups/daily
+ENV
+
+docker compose -f docker-compose.prod.yml up --build -d
 ```
 
-- Put real TLS in front of the frontend nginx (or your ingress).
-- `/api/metrics` is unauthenticated — scrape internally or gate at ingress.
+- Mongo: auth enforced, requireTLS, single-node replica set (transactions).
+- Backend connects as least-privileged `recon_app` over TLS.
+- `/api/metrics` — gate at ingress or scrape internally.
+- Frontend nginx terminates :8080; put real TLS at your edge.
 
 ## 3. Data operations
 
-| Task | Command |
+| Task | Mechanism |
 |---|---|
-| Nightly backup (14 kept) | `30 2 * * * python scripts/backup_db.py --keep 14` |
+| Nightly off-box backup | prod compose `backup` sidecar: dump→gzip→S3 (`BACKUP_S3_BUCKET`), 7 local retained |
+| Manual backup | `python scripts/backup_db.py --gzip --s3 s3://bucket/prefix` |
 | Archive batches > 90d | `python scripts/archive_batches.py --days 90` |
 | Restore one batch | `python scripts/archive_batches.py --batch-id <id> --restore` |
 
