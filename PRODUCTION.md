@@ -108,3 +108,11 @@ curl -X POST .../api/integrations/razorpay/sync -d '{"hours_back":24}'
 
 Or schedule it: Admin → Batch Schedules → action `razorpay_sync`
 (e.g. `30 */4 * * *` pulls every 4 hours; identical windows dedupe).
+
+## 9. Disk hygiene (learned the hard way)
+
+- **Rotate mongod logs.** An unrotated `--logpath` file grew to 15 GB with
+  request logging and filled the disk (index builds refuse <500MB free).
+  Run mongod with `--logRotate reopen` and a logrotate/cron truncation.
+- WiredTiger does not return space on `drop`/`deleteMany` — schedule
+  `compact` maintenance or use the archival tooling before disk pressure.
