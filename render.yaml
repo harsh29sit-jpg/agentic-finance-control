@@ -1,0 +1,36 @@
+# Backend — Render blueprint (repo root). Deploys backend/Dockerfile as a
+# persistent web service: scheduler loop, long agent tool-calls and append-only
+# audit chain all require a live process, which is why the API is NOT serverless.
+#
+# Prereqs you must supply in the Render dashboard when prompted:
+#   MONGO_URL     -> MongoDB Atlas SRV URI (M0 free tier is fine to start)
+#   CORS_ORIGINS  -> your Vercel frontend URL, e.g. https://<app>.vercel.app
+#   CUSTOM_LLM_API_KEY -> OpenRouter key (agents); omit to run deterministic-only
+services:
+  - type: web
+    name: recon-control-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        value: recon_control_tower
+      - key: JWT_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: CORS_ORIGINS
+        sync: false
+      - key: CUSTOM_LLM_BASE_URL
+        value: https://openrouter.ai/api
+      - key: CUSTOM_LLM_MODEL
+        value: stealth/ox-alpha
+      - key: CUSTOM_LLM_API_KEY
+        sync: false
+      - key: SCHED_INTERVAL_S
+        value: "30"

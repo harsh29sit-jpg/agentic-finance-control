@@ -82,7 +82,7 @@ backend/
   models.py          pydantic request contracts
   agents/            providers · contracts · runtime · evidence · triage/narration/reviewer/copilot
   tests/             88 tests: engine units, agent guarantees, live API suites (xdist-isolated)
-api/index.py         serverless entrypoint (Vercel-style same-origin /api)
+render.yaml           backend blueprint (Render/Railway Docker deploy) — see DEPLOY.md
 ```
 
 **Security & controls:** JWT + role-gated routes (support is read-only; self-registration limited to non-privileged roles) · login/register rate limiting (10/min) · maker-checker approval for material overrides (> ₹2,000) · PAN/card scrubbing before any LLM call · upload fingerprinting for idempotent re-runs · request-ID middleware · health probe at `/api/health`.
