@@ -173,3 +173,15 @@ JWT_SECRET=$(openssl rand -hex 32) ANTHROPIC_API_KEY=sk-ant-... docker compose u
 
 `docker-compose.yml` wires mongo + FastAPI + nginx-served SPA with healthchecks;
 the agent needs an LLM key passed through (see `backend/.env.example`).
+
+### Data lifecycle
+
+Hot collections grow with every batch; keep them lean without losing history:
+
+```bash
+.venv/bin/python scripts/archive_batches.py --days 90 --dry-run  # preview
+.venv/bin/python scripts/archive_batches.py --days 90            # move to archive_*
+.venv/bin/python scripts/archive_batches.py --batch-id <id> --restore
+```
+
+Archived batches disappear from hot dashboards and reappear intact on restore.
