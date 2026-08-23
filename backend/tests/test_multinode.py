@@ -156,7 +156,10 @@ class TestSchedulerLeases:
                 return {"id": "recovered-batch"}
 
             svc.configure({"sandbox_seed": runner})
-            await svc.start()                              # startup recovery pass
+            # Deterministic recovery path (no background loop): the loop is
+            # spawned by start() and races an explicit tick() for the atomic
+            # claim — exactly-once means only one of the two observes the run.
+            await svc.recover_leases()
             try:
                 ran = await asyncio.wait_for(svc.tick(), timeout=10)
             finally:
@@ -169,6 +172,43 @@ class TestSchedulerLeases:
         assert any(r["id"] == "lease-expired" for r in ran)
         assert doc["last_status"] == "ok"
         assert "claimed_by" not in doc and "in_flight" not in doc   # lease released
+
+    def test_concurrent_ticks_execute_exactly_once(self):
+        """Two 'instances' ticking at the same moment -> one execution total."""
+        async def scenario():
+            db = _db()
+            sid = "lease-race"
+            await db.schedules.delete_one({"id": sid})
+            await db.schedules.insert_one({
+                "id": sid, "name": "raced", "cron": "* * * * *",
+                "action": "sandbox_seed", "enabled": True,
+                "next_run_at": datetime.now(timezone.utc).isoformat(),
+                "run_count": 0})
+            runs = []
+
+            def make_svc():
+                from scheduler import BatchScheduler
+                s = BatchScheduler(_db())
+
+                async def runner(actor="t", trigger="schedule", schedule=None):
+                    runs.append(s.instance_id)
+                    return {"id": "race-batch"}
+
+                s.configure({"sandbox_seed": runner})
+                return s
+
+            a, b = make_svc(), make_svc()          # distinct instance ids
+            results = await asyncio.gather(a.tick(), b.tick())
+            doc = await db.schedules.find_one({"id": sid}, {"_id": 0})
+            await db.schedules.delete_one({"id": sid})
+            return results, runs, doc
+
+        results, runs, doc = asyncio.run(scenario())
+        assert len(runs) == 1, f"exactly-once violated: {len(runs)} executions"
+        executed = [r for r in results if r]
+        assert len(executed) == 1
+        assert any(item["id"] == "lease-race" for r in executed for item in r)
+        assert doc["run_count"] == 1
 
     def test_startup_does_not_clear_live_leases_of_others(self):
         async def scenario():

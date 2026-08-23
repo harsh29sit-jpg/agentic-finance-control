@@ -163,14 +163,17 @@ class BatchScheduler:
     def configure(self, runners):
         self._runners.update(runners)
 
-    async def start(self):
-        # recover only leases that have already expired (crashed instances);
-        # live leases held by other nodes are respected.
+    async def recover_leases(self):
+        """Clear only leases that have already expired (crashed instances);
+        live leases held by other nodes are respected."""
         cutoff = datetime.now(timezone.utc).isoformat()
-        await self.db.schedules.update_many(
+        return await self.db.schedules.update_many(
             {"in_flight": True, "claim_expires_at": {"$lt": cutoff}},
             {"$set": {"in_flight": False},
              "$unset": {"claimed_by": "", "claim_expires_at": ""}})
+
+    async def start(self):
+        await self.recover_leases()
         self._task = asyncio.create_task(self._loop())
         logger.info("scheduler started on instance %s (%s)",
                     self.instance_id[:8], ", ".join(self._runners) or "no runners")
@@ -222,23 +225,39 @@ class BatchScheduler:
 
         Manual triggers run even when `enabled` is false (explicit intent).
         Returns the runner result dict, or None when another live instance
-        currently holds the lease.
+        currently holds the lease or already advanced this run.
+
+        Correctness under stale reads: the claim atomically ADVANCES
+        next_run_at, and scheduled claims additionally require the SERVER-SIDE
+        next_run_at to still be due. An instance acting on a pre-update
+        snapshot therefore cannot execute a run another instance just took —
+        including sequentially, after the first holder released.
         """
         sid = schedule["id"]
         now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
         lease_expiry = (now + timedelta(seconds=self.CLAIM_LEASE_S)).isoformat()
+        try:
+            nxt_iso = next_fire(schedule["cron"], now).isoformat()
+        except CronError:
+            nxt_iso = None
+
+        claim_filter = {"id": sid,
+                        "$or": [{"in_flight": {"$ne": True}},
+                                {"claim_expires_at": {"$lt": now_iso}}]}
+        if triggered_by == "schedule":
+            claim_filter["next_run_at"] = {"$lte": now_iso}
         claimed = await self.db.schedules.find_one_and_update(
-            {"id": sid,
-             "$or": [{"in_flight": {"$ne": True}},
-                     {"claim_expires_at": {"$lt": now.isoformat()}}]},
+            claim_filter,
             {"$set": {"in_flight": True,
                       "claimed_by": self.instance_id,
-                      "claim_expires_at": lease_expiry}})
+                      "claim_expires_at": lease_expiry,
+                      "next_run_at": nxt_iso}})
         if not claimed:
             logger.warning("schedule %s lease held elsewhere; skipping", sid)
             return None
 
-        started = now.isoformat()
+        started = now_iso
         status, detail, result = "failed", {}, None
         try:
             runner = self._runners.get(schedule.get("action"))
@@ -252,18 +271,11 @@ class BatchScheduler:
             detail = {"error": str(e)[:300]}
             logger.exception("schedule %s run failed", sid)
         finally:
-            after = datetime.now(timezone.utc)
-            try:
-                nxt = next_fire(schedule["cron"], after)
-                nxt_iso = nxt.isoformat()
-            except CronError:
-                nxt_iso = None
             await self.db.schedules.update_one(
                 {"id": sid, "claimed_by": self.instance_id},
                 {"$set": {"last_run_at": started,
                           "last_status": status, "last_result": detail,
-                          "last_triggered_by": triggered_by,
-                          "next_run_at": nxt_iso},
+                          "last_triggered_by": triggered_by},
                  "$inc": {"run_count": 1},
                  "$unset": {"in_flight": "", "claimed_by": "", "claim_expires_at": ""}})
         return result or {"status": status, **detail}
