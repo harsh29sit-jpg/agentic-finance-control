@@ -198,13 +198,18 @@ class BatchScheduler:
         ran = []
         docs = await self.db.schedules.find({"enabled": True}).to_list(200)
         for s in docs:
-            due = False
             nra = s.get("next_run_at")
-            if nra:
-                try:
-                    due = datetime.fromisoformat(nra) <= now
-                except ValueError:
-                    due = False
+            if not nra:
+                continue
+            try:
+                due_dt = datetime.fromisoformat(nra)
+                if due_dt.tzinfo is None:
+                    due_dt = due_dt.replace(tzinfo=timezone.utc)
+                due = due_dt <= now
+            except (ValueError, TypeError):
+                logger.warning("schedule %s has unparsable next_run_at %r; skipping",
+                               s.get("id"), nra)
+                continue
             if not due:
                 continue
             result = await self.run_now(s, triggered_by="schedule")

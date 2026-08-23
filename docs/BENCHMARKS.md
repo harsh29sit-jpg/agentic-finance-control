@@ -50,3 +50,24 @@ Rerun anytime:
 Workbench table now virtualizes (fixed-height windowing hook, zero deps):
 DOM rows stay bounded (~30) regardless of the 2000-row fetch cap, so scroll
 and filter interactions stay constant-time on large batches.
+
+## Multi-instance deployment (3 uvicorn instances behind round-robin LB)
+
+Verified live via `scripts/multi_instance_verify.py`:
+
+| Guarantee | Evidence |
+|---|---|
+| Audit chain stays linear | 18 concurrent batch creations split across 3 instances → `/audit/verify` valid across 152,960 events |
+| Shared rate-limit budget | Cross-instance login hammer trips ONE global bucket (429 after threshold, not per-node) |
+| Scheduler lease exclusivity | Due schedule with 3 tick loops: `run_count == 1`, lease released, zero duplicates |
+
+Also hardened during verification: a malformed `next_run_at` no longer
+crashes the scheduler tick loop for every schedule (naive/invalid
+timestamps are skipped with a warning).
+
+Reproduce:
+```bash
+# terminals: instances on :8000/:8001/:8002 + scripts/lb_proxy.py :8003
+python scripts/multi_instance_verify.py --base http://localhost:8003 \
+  --instances http://localhost:8000,http://localhost:8001,http://localhost:8002
+```
