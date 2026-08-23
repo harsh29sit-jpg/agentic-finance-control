@@ -44,3 +44,9 @@ Rerun anytime:
 .venv/bin/python scripts/load_test.py --base http://localhost:8000 \
   --settlements 40000 --workers 50 --requests-per-worker 60
 ```
+
+## Frontend rendering
+
+Workbench table now virtualizes (fixed-height windowing hook, zero deps):
+DOM rows stay bounded (~30) regardless of the 2000-row fetch cap, so scroll
+and filter interactions stay constant-time on large batches.

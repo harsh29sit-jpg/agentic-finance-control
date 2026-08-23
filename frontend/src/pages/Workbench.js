@@ -4,8 +4,11 @@ import api from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { StatusPill } from "@/components/StatusPill";
 import { EvidenceDrawer } from "@/components/EvidenceDrawer";
+import useVirtualWindow from "@/hooks/useVirtualWindow";
 import { rupees } from "@/lib/format";
 import { toast } from "sonner";
+
+const ROW_H = 33;
 
 const BatchSelect = ({ batches, value, onChange }) => (
   <select data-testid="batch-select" value={value || ""} onChange={(e) => onChange(e.target.value)}
@@ -32,7 +35,7 @@ export default function Workbench() {
 
   const load = useCallback(() => {
     if (!batchId) return;
-    api.get(`/reconciliation?batch_id=${batchId}`).then(({ data }) => setRows(data));
+    api.get(`/reconciliation?batch_id=${batchId}&limit=2000`).then(({ data }) => setRows(data));
   }, [batchId]);
 
   useEffect(() => { if (batchId) { setParams({ batch: batchId }); load(); } }, [batchId, load, setParams]);
@@ -47,6 +50,8 @@ export default function Workbench() {
   };
 
   const filtered = rows.filter((r) => filter === "all" || r.status === filter);
+  const vw = useVirtualWindow({ itemCount: filtered.length, rowHeight: ROW_H });
+  const visible = filtered.slice(vw.start, vw.end);
   const summary = {
     matched: rows.filter((r) => r.status === "matched").length,
     pending: rows.filter((r) => r.status === "pending_review").length,
@@ -72,9 +77,10 @@ export default function Workbench() {
         </div>
       </div>
 
-      <div className="overflow-x-auto p-6 pt-4">
+      <div ref={vw.ref} onScroll={vw.onScroll}
+        className="h-[calc(100vh-300px)] min-h-[320px] overflow-auto p-6 pt-4">
         <table className="recon-table w-full text-left text-xs">
-          <thead className="sticky top-0 bg-secondary text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-secondary text-muted-foreground">
             <tr>
               <th>Settlement</th><th>UTR</th><th>Merchant</th><th>Rail</th><th className="text-center">Pass</th>
               <th className="text-right">Settlement ₹</th><th className="text-right">Bank ₹</th><th className="text-right">Δ paise</th>
@@ -82,9 +88,15 @@ export default function Workbench() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {filtered.length === 0 && <tr><td colSpan={11} className="py-10 text-center text-muted-foreground">No matches for this filter</td></tr>}
-            {filtered.map((r) => (
-              <tr key={r.id} data-testid={`recon-row-${r.settlement_id}`} className="cursor-pointer" onClick={() => setSelected(r)}>
+            {filtered.length === 0 && (
+              <tr><td colSpan={11} className="py-10 text-center text-muted-foreground">No matches for this filter</td></tr>
+            )}
+            {vw.topPad > 0 && (
+              <tr aria-hidden style={{ height: vw.topPad }}><td colSpan={11} style={{ padding: 0, border: "none" }} /></tr>
+            )}
+            {visible.map((r) => (
+              <tr key={r.id} data-testid={`recon-row-${r.settlement_id}`} data-virtual={vw.start}
+                className="cursor-pointer" onClick={() => setSelected(r)}>
                 <td className="font-mono font-semibold">{r.settlement_id}</td>
                 <td className="font-mono text-muted-foreground">{r.utr}</td>
                 <td>{r.merchant_id}</td>
@@ -98,6 +110,9 @@ export default function Workbench() {
                 <td><StatusPill status={r.status} /></td>
               </tr>
             ))}
+            {vw.bottomPad > 0 && (
+              <tr aria-hidden style={{ height: vw.bottomPad }}><td colSpan={11} style={{ padding: 0, border: "none" }} /></tr>
+            )}
           </tbody>
         </table>
       </div>
