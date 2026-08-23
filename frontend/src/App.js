@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Batches from "@/pages/Batches";
@@ -25,15 +26,15 @@ function App() {
           <BrowserRouter>
             <Routes>
               <Route path="/login" element={<Login />} />
-              <Route path="/" element={<P><Dashboard /></P>} />
-              <Route path="/batches" element={<P><Batches /></P>} />
-              <Route path="/workbench" element={<P><Workbench /></P>} />
-              <Route path="/exceptions" element={<P><Exceptions /></P>} />
-              <Route path="/reports" element={<P><Reports /></P>} />
-              <Route path="/evaluation" element={<P><Evaluation /></P>} />
-              <Route path="/audit" element={<P><Audit /></P>} />
-              <Route path="/copilot" element={<P><Copilot /></P>} />
-              <Route path="/admin" element={<P><Admin /></P>} />
+              <Route path="/" element={<P><ErrorBoundary><Dashboard /></ErrorBoundary></P>} />
+              <Route path="/batches" element={<P><ErrorBoundary><Batches /></ErrorBoundary></P>} />
+              <Route path="/workbench" element={<P><ErrorBoundary><Workbench /></ErrorBoundary></P>} />
+              <Route path="/exceptions" element={<P><ErrorBoundary><Exceptions /></ErrorBoundary></P>} />
+              <Route path="/reports" element={<P><ErrorBoundary><Reports /></ErrorBoundary></P>} />
+              <Route path="/evaluation" element={<P><ErrorBoundary><Evaluation /></ErrorBoundary></P>} />
+              <Route path="/audit" element={<P><ErrorBoundary><Audit /></ErrorBoundary></P>} />
+              <Route path="/copilot" element={<P><ErrorBoundary><Copilot /></ErrorBoundary></P>} />
+              <Route path="/admin" element={<P><ErrorBoundary><Admin /></ErrorBoundary></P>} />
             </Routes>
           </BrowserRouter>
           <Toaster position="top-right" richColors />

@@ -163,3 +163,13 @@ GET  /api/health
 ## Design Language
 
 Razorpay Blade tokens: Prussian-blue sidebar `#012652`, brand blue `#0d94fb`, white work surfaces, thin borders `#ebecf0`, 4px radii, monospace for IDs/UTRs/paise. Dark mode included. Dense tables first; charts secondary.
+
+## One-command deploy (Docker)
+
+```bash
+JWT_SECRET=$(openssl rand -hex 32) ANTHROPIC_API_KEY=sk-ant-... docker compose up --build
+# UI on http://localhost:8080 · API proxied same-origin · Mongo volume persisted
+```
+
+`docker-compose.yml` wires mongo + FastAPI + nginx-served SPA with healthchecks;
+the agent needs an LLM key passed through (see `backend/.env.example`).
