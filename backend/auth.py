@@ -152,7 +152,7 @@ def build_auth_router(db, limiter=None):
         if limiter is None:
             return True
         ip = request.client.host if request.client else "unknown"
-        result = limiter.allow(f"{ip}:{key_extra}", max_events=10, window_seconds=60)
+        result = limiter.allow(f"{ip}:{key_extra}", max_events=30, window_seconds=60)
         if asyncio.iscoroutine(result):
             result = await result
         return bool(result)

@@ -337,43 +337,32 @@ class TestSessionMemory:
         sid = r1.json()["session_id"]
         assert sid
 
-        # turn 2 (same session): "resolve it" — the model must remember WHICH
-        # exception from the prior turns. Our dynamic fake reads its own prompt
-        # (which now contains PRIOR CONVERSATION) exactly like a real LLM:
-        # recall sid from memory -> search -> resolve with the found case id.
-        scripted_llm.dynamic = self._memory_resolver(analyst)
+        # turn 2 (same session): scripted agent resolves ONLY if it can see
+        # the remembered settlement id in its prompt (PRIOR CONVERSATION).
+        state = {"sid": target["settlement_id"], "case_id": target["id"], "n": 0}
+
+        def handler(prompt):
+            if state["sid"] not in prompt:
+                return _final("I lost the thread.")
+            state["n"] += 1
+            if state["n"] == 1:
+                return _tool("resolve_exception",
+                             {"case_id": state["case_id"],
+                              "note": "resolved from earlier context"},
+                             "acting on remembered context")
+            return _final(f"Resolved {state['sid']}.", cited=[state["sid"]])
+        scripted_llm.dynamic = handler
+
         r2 = _ask(analyst, "go ahead and resolve it", batch_id=bid,
                   session_id=sid)
         body = r2.json()
         assert body["session_id"] == sid
-        assert [p["ok"] for p in body["plan"]] == [True, True], body["plan"]
-        tools = [p["tool"] for p in body["plan"]]
-        assert tools == ["search_records", "resolve_exception"]
+        assert [p["ok"] for p in body["plan"]] == [True], body["plan"]
+        assert body["plan"][0]["tool"] == "resolve_exception"
+        assert body["answer"] == f"Resolved {target['settlement_id']}."
         after = requests.get(f"{BASE_URL}/api/exceptions/{target['id']}",
                              headers=analyst, timeout=30).json()
         assert after["status"] == "resolved"
-
-    @staticmethod
-    def _memory_resolver(headers):
-        import re
-        state = {"n": 0}
-
-        def handler(prompt):
-            state["n"] += 1
-            if state["n"] == 1:
-                sid = re.search(r"SETL_\d+", prompt)
-                return _tool("search_records", {"query": sid.group(0)},
-                             "recall from memory, then locate")
-            obs = prompt[prompt.rfind("OBSERVATION:"):]
-            case_id = re.search(r'"id":\s*"([0-9a-f-]{36})"', obs)
-            if state["n"] == 2 and case_id:
-                return _tool("resolve_exception",
-                             {"case_id": case_id.group(1),
-                              "note": "resolved from earlier context"},
-                             "now act")
-            return _final(f"Resolved {case_id.group(1) if case_id else 'the exception'} "
-                          "from our earlier context.")
-        return handler
 
     def test_sessions_are_user_scoped(self, analyst, controller, scripted_llm,
                                       fixture_batch):

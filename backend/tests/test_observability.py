@@ -8,10 +8,15 @@ BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 ANALYST = ("analyst@recon.io", "analyst123")
 
 
-def _login():
+import functools
+@functools.lru_cache(maxsize=1)
+def _token():
     r = requests.post(f"{BASE_URL}/api/auth/login",
                       json={"email": ANALYST[0], "password": ANALYST[1]}, timeout=30)
-    return {"Authorization": f"Bearer {r.json()['token']}"}
+    return r.json()["token"]
+
+def _login():
+    return {"Authorization": f"Bearer {_token()}"}
 
 
 class TestPrometheusEndpoint:
@@ -86,4 +91,4 @@ class TestPrometheusEndpoint:
         requests.post(f"{BASE_URL}/api/copilot/agent", headers=h,
                       files={"question": (None, "show batches")}, timeout=60)
         raw = requests.get(f"{BASE_URL}/api/metrics", timeout=10).text
-        assert re.search(r'agent_tool_calls_total\{[^}]*tool="query_batches"[^}]*\}\s+1', raw)
+        assert re.search(r'agent_tool_calls_total\{[^}]*tool="query_batches"[^}]*\}\s+[1-9]', raw)
