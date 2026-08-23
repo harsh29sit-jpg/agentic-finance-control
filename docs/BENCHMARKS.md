@@ -71,3 +71,17 @@ Reproduce:
 python scripts/multi_instance_verify.py --base http://localhost:8003 \
   --instances http://localhost:8000,http://localhost:8001,http://localhost:8002
 ```
+
+## Index coverage at production cardinality (`scripts/index_report.py`)
+
+EXPLAIN audit of every hot query shape against the live 175k-row dataset
+found two gaps; both fixed and verified:
+
+| Query | Before | After |
+|---|---|---|
+| Workbench filtered/full-batch list | in-memory SORT, 32,484 docs examined | index walk, **25 keys / 25 docs** |
+| Decision detail + review lookup | COLLSCAN of 158k docs | `{id:1}` point lookup, **1 doc** |
+
+New startup indexes: `match_decisions {batch_id,status,amount desc}`,
+`{batch_id, amount desc}`, `{id}`. Rerun the report anytime — it samples
+the largest real batch so numbers reflect production-like selectivity.

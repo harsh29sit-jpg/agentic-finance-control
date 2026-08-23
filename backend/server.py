@@ -100,7 +100,11 @@ async def lifespan(_app):
     await db.exception_cases.create_index("status")
     await db.exception_cases.create_index([("value_at_risk_paise", -1)])
     await db.match_decisions.create_index([("batch_id", 1), ("settlement_id", 1)])
-    await db.match_decisions.create_index([("batch_id", 1), ("status", 1)])
+    await db.match_decisions.create_index([("batch_id", 1), ("status", 1),
+                                           ("settlement_amount_paise", -1)])
+    await db.match_decisions.create_index([("batch_id", 1),
+                                           ("settlement_amount_paise", -1)])
+    await db.match_decisions.create_index([("id", 1)])
     await db.audit_events.create_index([("batch_id", 1), ("created_at", -1)])
     await db.audit_events.create_index("seq", unique=True)
     await db.model_invocations.create_index([("batch_id", 1), ("created_at", -1)])
