@@ -5,7 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { fmtDate } from "@/lib/format";
 import { toast } from "sonner";
-import { ShieldCheck, Users, SlidersHorizontal, Clock, Play, Trash2 } from "lucide-react";
+import { ShieldCheck, Users, SlidersHorizontal, Clock, Play, Trash2, KeyRound } from "lucide-react";
 
 const ROLE_CAPS = {
   admin: "Full access · policies · overrides",
@@ -26,6 +26,7 @@ export default function Admin() {
   const [pending, setPending] = useState([]);
   const [schedules, setSchedules] = useState([]);
   const [schedForm, setSchedForm] = useState({ name: "", cron: "0 6 * * *", action: "replay_latest_upload" });
+  const [mfa, setMfa] = useState({ stage: "idle", secret: "", uri: "", code: "", codes: null, password: "" });
   const [form, setForm] = useState({ amount_tolerance_paise: 100, timing_lag_days: 1, auto_post_confidence: 0.95, note: "" });
   const canEdit = ["controller", "admin"].includes(user?.role);
 
@@ -72,6 +73,30 @@ export default function Admin() {
     catch (e) { toast.error(e.response?.data?.detail || "Delete failed"); }
   };
 
+  // ---- MFA enrollment ----
+  const mfaSetup = async () => {
+    try {
+      const { data } = await api.post("/auth/mfa/setup");
+      setMfa({ ...mfa, stage: "verify", secret: data.secret, uri: data.otpauth_uri });
+    } catch (e) { toast.error(e.response?.data?.detail || "Setup failed"); }
+  };
+
+  const mfaEnable = async () => {
+    try {
+      const { data } = await api.post("/auth/mfa/enable", { code: mfa.code });
+      setMfa({ ...mfa, stage: "codes", codes: data.recovery_codes });
+      toast.success("MFA enabled — save your recovery codes now");
+    } catch (e) { toast.error(e.response?.data?.detail || "Invalid code"); }
+  };
+
+  const mfaDisable = async () => {
+    try {
+      await api.post("/auth/mfa/disable", { password: mfa.password });
+      setMfa({ stage: "idle", secret: "", uri: "", code: "", codes: null, password: "" });
+      toast.success("MFA disabled");
+    } catch (e) { toast.error(e.response?.data?.detail || "Password incorrect"); }
+  };
+
   return (
     <div>
       <PageHeader title="Admin / Policy Center" subtitle="Matching policy versions · RBAC · pending checker approvals" />
@@ -114,8 +139,67 @@ export default function Admin() {
           </div>
         </div>
 
-        {/* RBAC + pending approvals */}
-        <div className="space-y-5">
+          {/* RBAC + MFA + pending approvals */}
+          <div className="space-y-5">
+          <div className="rounded-md border border-border bg-card p-4">
+            <h3 className="flex items-center gap-1.5 text-sm font-bold"><KeyRound size={15} className="text-brand" /> Two-Factor Authentication</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              TOTP authenticator (Google Authenticator, 1Password, Authy). Required at every login once enabled.
+            </p>
+
+            {mfa.stage === "idle" && (
+              <Button data-testid="mfa-setup" onClick={mfaSetup} variant="outline"
+                className="mt-3 h-8 gap-1.5 border-brand/40 text-xs text-brand hover:bg-brand/5">
+                <KeyRound size={13} /> Set up authenticator
+              </Button>
+            )}
+
+            {mfa.stage === "verify" && (
+              <div className="mt-3 space-y-2">
+                <div className="rounded border border-border bg-secondary/50 p-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">1. Add this secret to your app</div>
+                  <code className="mt-1 block break-all rounded bg-background px-2 py-1 font-mono text-[11px]">{mfa.secret}</code>
+                  <div className="mt-1 break-all font-mono text-[9px] text-muted-foreground">{mfa.uri}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input data-testid="mfa-code" placeholder="6-digit code" maxLength={6} value={mfa.code}
+                    onChange={(e) => setMfa({ ...mfa, code: e.target.value })}
+                    className="h-8 w-28 rounded border border-input bg-background px-2 font-mono text-sm tracking-widest outline-none focus:ring-2 focus:ring-brand" />
+                  <Button data-testid="mfa-enable" onClick={mfaEnable} disabled={mfa.code.length !== 6}
+                    className="h-8 bg-brand px-3 text-xs text-white hover:bg-brand/90">Verify & enable</Button>
+                </div>
+              </div>
+            )}
+
+            {mfa.stage === "codes" && (
+              <div className="mt-3 space-y-2">
+                <div data-testid="mfa-recovery" className="rounded border border-warning/40 bg-warning/5 p-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-warning">Recovery codes — shown once</div>
+                  <div className="mt-1 grid grid-cols-4 gap-1 font-mono text-[11px]">
+                    {mfa.codes.map((c) => <span key={c} className="rounded bg-background px-1 py-0.5">{c}</span>)}
+                  </div>
+                </div>
+                <Button size="sm" onClick={() => setMfa({ stage: "idle", secret: "", uri: "", code: "", codes: null, password: "" })}
+                  className="h-7 bg-brand text-xs text-white hover:bg-brand/90">Done</Button>
+              </div>
+            )}
+
+            {mfa.stage === "disable" && (
+              <div className="mt-3 flex items-center gap-2">
+                <input type="password" placeholder="Confirm password" value={mfa.password}
+                  onChange={(e) => setMfa({ ...mfa, password: e.target.value })}
+                  className="h-8 w-44 rounded border border-input bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-brand" />
+                <Button onClick={mfaDisable} variant="destructive" className="h-8 px-3 text-xs">Disable MFA</Button>
+                <button onClick={() => setMfa({ stage: "idle", secret: "", uri: "", code: "", codes: null, password: "" })}
+                  className="text-[11px] text-muted-foreground hover:text-foreground">cancel</button>
+              </div>
+            )}
+            {mfa.stage === "idle" && (
+              <button onClick={() => setMfa({ ...mfa, stage: "disable" })}
+                className="mt-2 text-[10px] text-muted-foreground underline hover:text-destructive">Disable existing MFA</button>
+            )}
+          </div>
+
           <div className="rounded-md border border-border bg-card p-4">
             <h3 className="flex items-center gap-1.5 text-sm font-bold"><Users size={15} className="text-brand" /> Roles & Access</h3>
             <div className="mt-3 space-y-1.5">

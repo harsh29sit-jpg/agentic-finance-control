@@ -20,6 +20,8 @@ export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("analyst@recon.io");
   const [password, setPassword] = useState("analyst123");
+  const [totp, setTotp] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -27,11 +29,19 @@ export default function Login() {
     e?.preventDefault?.();
     setBusy(true); setError("");
     try {
-      await login(em || email, pw || password);
+      await login(em || email, pw || password, totp || undefined);
       toast.success("Signed in");
+      setMfaRequired(false); setTotp("");
       navigate("/");
     } catch (err) {
-      setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);
+      const detail = err.response?.data?.detail;
+      if (detail?.mfa_required) {
+        setMfaRequired(true);
+        setError("Enter the 6-digit code from your authenticator app.");
+      } else {
+        setMfaRequired(false);
+        setError(formatApiErrorDetail(detail) || err.message);
+      }
     } finally { setBusy(false); }
   };
 
@@ -78,6 +88,15 @@ export default function Login() {
               <input data-testid="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
                 className="mt-1 w-full rounded border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand" />
             </div>
+            {mfaRequired && (
+              <div>
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-brand">Authenticator code</label>
+                <input data-testid="login-totp" inputMode="numeric" maxLength={10} autoFocus value={totp}
+                  onChange={(e) => setTotp(e.target.value)}
+                  placeholder="6-digit code or recovery code"
+                  className="mt-1 w-full rounded border border-brand/50 bg-background px-3 py-2 font-mono text-sm tracking-widest outline-none focus:ring-2 focus:ring-brand" />
+              </div>
+            )}
             {error && <div data-testid="login-error" className="rounded border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</div>}
             <Button data-testid="login-submit" type="submit" disabled={busy}
               className="h-10 w-full bg-brand font-semibold text-white hover:bg-brand/90">

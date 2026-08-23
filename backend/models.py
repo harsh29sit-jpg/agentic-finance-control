@@ -14,6 +14,8 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
+    totp: Optional[str] = Field(default=None, max_length=10,
+                                description="MFA code (TOTP or recovery code)")
 
 
 # ---- Review ----

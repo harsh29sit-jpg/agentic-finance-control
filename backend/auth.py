@@ -1,4 +1,4 @@
-"""JWT email/password auth + RBAC + refresh-token lifecycle.
+"""JWT email/password auth + RBAC + refresh lifecycle + TOTP MFA.
 
 Token model:
   - Access token: 30 min, stateless (kept in localStorage by the SPA).
@@ -9,16 +9,25 @@ Account lockout:
   - Persistent per-email failed-attempt counters in Mongo: 8 failures in a
     15-minute window locks the account for 15 minutes (429), independent of
     the IP-based rate limiter. Successful login resets the counter.
+MFA:
+  - RFC 6238 TOTP (stdlib). Pending secret is encrypted at rest (AES-GCM,
+    key derived from JWT_SECRET); recovery codes are stored hashed,
+    single-use.
 """
 import os
 import asyncio
+import base64
 import hashlib
+import secrets as pysecrets
 import jwt
 import bcrypt
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from bson import ObjectId
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+import totp as totp_mod
 from models import RegisterRequest, LoginRequest
 
 JWT_ALGORITHM = "HS256"
@@ -53,6 +62,33 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def _secret() -> str:
     return os.environ["JWT_SECRET"]
+
+
+# ------------------------------------------------------------------ mfa crypto
+def _mfa_key() -> bytes:
+    return hashlib.sha256((_secret() + "::mfa").encode()).digest()
+
+
+def _encrypt_secret(plain: str) -> str:
+    aes = AESGCM(_mfa_key())
+    nonce = pysecrets.token_bytes(12)
+    enc = aes.encrypt(nonce, plain.encode(), None)
+    return base64.b64encode(nonce + enc).decode()
+
+
+def _decrypt_secret(blob: str) -> str:
+    raw = base64.b64decode(blob)
+    aes = AESGCM(_mfa_key())
+    return aes.decrypt(raw[:12], raw[12:], None).decode()
+
+
+RECOVERY_COUNT = 8
+
+
+def _new_recovery_codes():
+    codes = [pysecrets.token_hex(5) for _ in range(RECOVERY_COUNT)]
+    hashes = [hashlib.sha256(c.encode()).hexdigest() for c in codes]
+    return codes, hashes
 
 
 def _now():
@@ -227,10 +263,77 @@ def build_auth_router(db, limiter=None):
                 detail += f" ({remaining} attempts before temporary lock)"
             raise HTTPException(status_code=401, detail=detail)
 
+        # ---- MFA gate (TOTP or single-use recovery code) ----
+        if user.get("mfa_enabled"):
+            code = (body.totp or "").strip()
+            if not code:
+                raise HTTPException(
+                    status_code=401,
+                    detail={"message": "MFA code required", "mfa_required": True})
+            secret = _decrypt_secret(user["mfa_secret"])
+            if not totp_mod.verify(secret, code):
+                rec_hash = hashlib.sha256(code.encode()).hexdigest()
+                rec = await db.recovery_codes.find_one_and_update(
+                    {"user_id": str(user["_id"]), "hash": rec_hash, "used": False},
+                    {"$set": {"used": True, "used_at": _now().isoformat()}})
+                if not rec:
+                    await _record_failure(db, email)
+                    raise HTTPException(status_code=401, detail="Invalid MFA code")
+
         await db.auth_failures.delete_one({"email": email})
         payload = await _session_payload(user)
         _set_cookie(response, payload["token"])
         return payload
+
+    # ------------------------------------------------------------------ MFA
+    @router.post("/mfa/setup")
+    async def mfa_setup(request: Request, user: dict = Depends(get_current_user)):
+        if user.get("mfa_enabled"):
+            raise HTTPException(status_code=400,
+                                detail="MFA already enabled; disable first to re-enrol")
+        secret = totp_mod.generate_secret()
+        enc = _encrypt_secret(secret)
+        await db.users.update_one({"_id": ObjectId(user["id"])},
+                                  {"$set": {"mfa_secret_enc": enc,
+                                            "mfa_enabled": False}})
+        uri = totp_mod.provisioning_uri(secret, user["email"], "Recon Control Tower")
+        return {"secret": secret, "otpauth_uri": uri}
+
+    @router.post("/mfa/enable")
+    async def mfa_enable(request: Request, user: dict = Depends(get_current_user)):
+        body = await request.json()
+        code = ((body or {}).get("code") or "").strip()
+        doc = await db.users.find_one({"_id": ObjectId(user["id"])})
+        pending = doc.get("mfa_secret_enc") if doc else None
+        if not pending:
+            raise HTTPException(status_code=400, detail="Call /mfa/setup first")
+        secret = _decrypt_secret(pending)
+        if not totp_mod.verify(secret, code):
+            raise HTTPException(status_code=400, detail="Invalid code; try the current one")
+        codes, hashes = _new_recovery_codes()
+        await db.users.update_one({"_id": ObjectId(user["id"])},
+                                  {"$set": {"mfa_enabled": True,
+                                            "mfa_secret": pending}})
+        await db.users.update_one({"_id": ObjectId(user["id"])},
+                                  {"$unset": {"mfa_secret_enc": ""}})
+        await db.recovery_codes.delete_many({"user_id": user["id"]})
+        await db.recovery_codes.insert_many([
+            {"user_id": user["id"], "hash": h, "used": False} for h in hashes])
+        return {"ok": True, "recovery_codes": codes,
+                "note": "store these now; each works exactly once"}
+
+    @router.post("/mfa/disable")
+    async def mfa_disable(request: Request, user: dict = Depends(get_current_user)):
+        body = await request.json()
+        password = (body or {}).get("password") or ""
+        doc = await db.users.find_one({"_id": ObjectId(user["id"])})
+        if not doc or not verify_password(password, doc["password_hash"]):
+            raise HTTPException(status_code=401, detail="Password incorrect")
+        await db.users.update_one({"_id": ObjectId(user["id"])},
+                                  {"$set": {"mfa_enabled": False},
+                                   "$unset": {"mfa_secret": "", "mfa_secret_enc": ""}})
+        await db.recovery_codes.delete_many({"user_id": user["id"]})
+        return {"ok": True}
 
     @router.post("/refresh")
     async def refresh(request: Request, response: Response):
