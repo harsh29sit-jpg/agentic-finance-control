@@ -410,14 +410,17 @@ def build_auth_router(db, limiter=None):
         if not sso_mod.sso_enabled():
             raise HTTPException(status_code=501,
                                 detail="SSO not configured (set OIDC_* and PUBLIC_BASE_URL)")
-        state = sso_mod.make_state()
-        url = sso_mod.authorize_url(sso_mod._discovery(), state)
+        bundle, cookie_value = sso_mod.make_flow_bundle()
+        discovery = sso_mod._discovery()
+        url = sso_mod.authorize_url(
+            discovery, state=bundle["state"],
+            code_challenge=sso_mod.pkce_challenge(bundle["verifier"]),
+            nonce=bundle["nonce"])
+        secure = os.environ.get("COOKIE_SECURE", "true").lower() in ("1", "true", "yes")
         response = Response(status_code=302)
         response.headers["Location"] = url
-        response.set_cookie("sso_state", state, httponly=True,
-                            max_age=sso_mod.STATE_TTL_S, path="/",
-                            secure=os.environ.get("COOKIE_SECURE", "true").lower()
-                            in ("1", "true", "yes"))
+        response.set_cookie("sso_flow", cookie_value, httponly=True,
+                            max_age=sso_mod.STATE_TTL_S, path="/", secure=secure)
         return response
 
     @router.get("/sso/callback")
@@ -425,16 +428,31 @@ def build_auth_router(db, limiter=None):
         import sso as sso_mod
         if not sso_mod.sso_enabled():
             raise HTTPException(status_code=501, detail="SSO not configured")
-        cookie_state = request.cookies.get("sso_state")
-        if not code or not state or not cookie_state or \
-                not hmac.compare_digest(state, cookie_state) or \
-                not sso_mod.verify_state(state):
+        cookie = request.cookies.get("sso_flow")
+        bundle = sso_mod.open_bundle(cookie) if cookie else None
+        if not code or not state or not bundle or \
+                not hmac.compare_digest(state, bundle["state"]):
             raise HTTPException(status_code=400, detail="Invalid SSO state")
-        tokens = sso_mod.exchange_code(sso_mod._discovery(), code)
-        email = sso_mod.fetch_email(sso_mod._discovery(), tokens["access_token"])
+
+        discovery = sso_mod._discovery()
+        tokens = sso_mod.exchange_code(
+            discovery, code, code_verifier=bundle["verifier"])
+
+        email, name = None, ""
+        id_token = tokens.get("id_token")
+        if id_token:
+            # verified against JWKS incl iss/aud/exp/nonce — never trusted blind
+            claims = sso_mod.verify_id_token(
+                id_token, discovery, nonce=bundle["nonce"])
+            email = (claims.get("email") or "").lower()
+            name = claims.get("name", "")
+        if not email:
+            email = sso_mod.fetch_email(
+                discovery, tokens["access_token"]) or ""
         if not email:
             raise HTTPException(status_code=400, detail="IdP did not return an email")
-        uid, email, name, role = await sso_mod.upsert_sso_user(db, email)
+
+        uid, email, name, role = await sso_mod.upsert_sso_user(db, email, name)
         access = create_access_token(uid, email, role)
         refresh, _th = await _issue_refresh(db, uid)
         return {"id": uid, "email": email, "name": name, "role": role,

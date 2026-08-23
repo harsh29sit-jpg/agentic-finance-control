@@ -136,9 +136,13 @@ async def review_exception(db, user, case_id, action, note=""):
     Maker-checker: overrides on material value need controller/admin."""
     if action not in EXC_ACTION_STATUS:
         raise ValueError("Invalid action")
-    case = await db.exception_cases.find_one({"id": case_id})
+    # accept internal id OR human-facing settlement_id (agent + UI parity)
+    case = await db.exception_cases.find_one({"id": case_id}) \
+        or await db.exception_cases.find_one(
+            {"settlement_id": case_id.upper(), "status": {"$in": ["open", "escalated"]}})
     if not case:
         raise LookupError("Exception not found")
+    case_id = case["id"]
     material = case["value_at_risk_paise"] > MATERIAL_THRESHOLD_PAISE
     if action == "override" and material and user["role"] not in ("controller", "admin"):
         status = "pending_approval"
@@ -160,9 +164,11 @@ async def decide_override(db, user, case_id, approve, note=""):
     """Checker sign-off on a pending material override (controller/admin only)."""
     if user["role"] not in ("controller", "admin"):
         raise PermissionError("Only controller/admin can decide overrides")
-    case = await db.exception_cases.find_one({"id": case_id})
+    case = await db.exception_cases.find_one({"id": case_id}) \
+        or await db.exception_cases.find_one({"settlement_id": case_id.upper()})
     if not case:
         raise LookupError("Exception not found")
+    case_id = case["id"]
     if case.get("status") != "pending_approval":
         raise ValueError("Case is not pending approval")
     status = "resolved" if approve else "open"

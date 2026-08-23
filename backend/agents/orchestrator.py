@@ -166,6 +166,11 @@ class AgentLoop:
         return {"ok": True, "result": _clip(data, 700), "state_changed": True}
 
     async def execute(self, name, args_dict):
+        sig = (name, json.dumps(args_dict or {}, sort_keys=True))
+        if sig == getattr(self, "_last_sig", None):
+            return {"ok": False,
+                    "error": "identical call repeated; vary the arguments or use a different tool"}
+        self._last_sig = sig
         t0 = time.perf_counter()
         try:
             if name in READ_TOOLS:
@@ -250,7 +255,7 @@ async def run_agent_question(db, question, ctx: RunContext, user, deps: dict,
         prompt = "\n\n".join(loop.transcript) + \
             "\n\nYour next JSON decision:"
         try:
-            raw = await providers.complete(system, prompt, timeout_s=25)
+            raw = await providers.complete(system, prompt, timeout_s=240)
         except Exception as e:  # noqa: BLE001 — provider faults must not 500
             provider_fault = f"{e.__class__.__name__}: {str(e)[:160]}"
             break

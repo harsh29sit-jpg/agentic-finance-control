@@ -74,9 +74,12 @@ def _resolve():
             model = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
             async def send_openai(system, prompt):
-                client = openai.AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+                client = openai.AsyncOpenAI(api_key=key, base_url=f"{base}/v1")
                 r = await client.chat.completions.create(
                     model=model, temperature=0,
+                    # reasoning models spend budget on thinking before content;
+                    # without an explicit ceiling the reply can come back empty
+                    max_tokens=int(os.environ.get("CUSTOM_LLM_MAX_TOKENS", "6000")),
                     messages=[{"role": "system", "content": system},
                               {"role": "user", "content": prompt}])
                 return r.choices[0].message.content

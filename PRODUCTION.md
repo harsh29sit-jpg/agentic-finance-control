@@ -79,10 +79,18 @@ Still open before regulated production:
 
 - **MFA**: TOTP (RFC 6238) per operator — enrol in Admin → Two-Factor
   Authentication; 8 single-use recovery codes issued at enablement.
-- **SSO**: generic OIDC authorization-code flow. Configure
-  `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
-  `PUBLIC_BASE_URL`; grant admin via `SSO_ADMIN_EMAILS`. Unconfigured
-  tenants get a clean 501 and the password+MFA path remains primary.
+- **SSO**: production-grade OIDC — PKCE (S256), JWKS-verified RS256
+  id_tokens with iss/aud/exp/nonce checks, signed state bundles.
+  Wiring a real tenant:
+  1. Register `https://<your-host>/api/auth/sso/callback` as an allowed
+     redirect URI in your IdP (Auth0/Okta/Google Workspace/Entra).
+  2. Set env: `OIDC_ISSUER_URL=https://<tenant>` · `OIDC_CLIENT_ID` ·
+     `OIDC_CLIENT_SECRET` · `PUBLIC_BASE_URL=https://<your-host>`.
+     Admins: comma list in `SSO_ADMIN_EMAILS`.
+  3. Restart — the login page shows "Sign in with SSO" automatically
+     (`GET /api/auth/sso/config` drives the button).
+  Integration coverage: tests/test_oidc_live.py runs the full network flow
+  against a live stub IdP (PKCE enforcement, nonce binding, tamper rejection).
 
 ## 8. Connector credentials & scheduled pulls
 

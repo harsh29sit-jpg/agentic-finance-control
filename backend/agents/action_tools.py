@@ -18,7 +18,7 @@ CHECKER_ROLES = ("controller", "admin")
 
 
 class ResolveExceptionArgs(BaseModel):
-    case_id: str = Field(description="exception case id")
+    case_id: str = Field(description="exception case id OR settlement_id (e.g. SETL_1030)")
     note: str = Field(default="", max_length=500)
 
 

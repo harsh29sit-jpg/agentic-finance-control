@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { formatApiErrorDetail } from "@/lib/format";
 import { toast } from "sonner";
@@ -24,6 +25,11 @@ export default function Login() {
   const [mfaRequired, setMfaRequired] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+
+  useEffect(() => {
+    api.get("/auth/sso/config").then(({ data }) => setSsoEnabled(!!data.enabled)).catch(() => {});
+  }, []);
 
   const submit = async (e, em, pw) => {
     e?.preventDefault?.();
@@ -96,6 +102,13 @@ export default function Login() {
                   placeholder="6-digit code or recovery code"
                   className="mt-1 w-full rounded border border-brand/50 bg-background px-3 py-2 font-mono text-sm tracking-widest outline-none focus:ring-2 focus:ring-brand" />
               </div>
+            )}
+            {ssoEnabled && (
+              <a data-testid="login-sso"
+                href={`${process.env.REACT_APP_BACKEND_URL || ""}/api/auth/sso/login`}
+                className="flex h-10 w-full items-center justify-center rounded border border-border text-sm font-semibold text-foreground transition-colors hover:border-brand hover:text-brand">
+                Sign in with SSO
+              </a>
             )}
             {error && <div data-testid="login-error" className="rounded border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</div>}
             <Button data-testid="login-submit" type="submit" disabled={busy}
