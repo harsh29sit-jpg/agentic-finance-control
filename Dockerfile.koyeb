@@ -1,0 +1,15 @@
+# Koyeb build: repo-root context (Koyeb builds from the repository root).
+# Kept separate from backend/Dockerfile, whose context is backend/.
+FROM python:3.12-slim
+WORKDIR /app
+
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt uvicorn
+
+COPY backend/ .
+
+ENV PORT=8000
+EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=5s --retries=10 \
+  CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')" || exit 1
+CMD ["sh", "-c", "python -m uvicorn server:app --host 0.0.0.0 --port ${PORT}"]

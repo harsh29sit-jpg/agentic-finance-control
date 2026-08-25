@@ -1,0 +1,35 @@
+# Koyeb App-as-Code — picked up automatically when this repo is connected.
+# Secrets marked REPLACE_ME must be filled in the Koyeb dashboard before deploy
+# (Service → Settings → Environment variables), or the API will crash-loop.
+app: recon-control-api
+services:
+  - name: recon-control-api
+    instance: free
+    builder: dockerfile
+    dockerfile:
+      path: Dockerfile.koyeb
+    ports:
+      - port: 8000
+        protocol: http
+        expose: true
+    health_checks:
+      - http:
+          path: /api/health
+          port: 8000
+    env:
+      - name: MONGO_URL
+        value: REPLACE_ME_ATLAS_SRV_URI
+      - name: DB_NAME
+        value: recon_control_tower
+      - name: JWT_SECRET
+        value: REPLACE_ME_64_HEX
+      - name: COOKIE_SECURE
+        value: "true"
+      - name: CORS_ORIGINS
+        value: https://recon-control-tower.vercel.app
+      - name: SCHED_INTERVAL_S
+        value: "30"
+    scaling:
+      instances: 1
+    regions:
+      - fra
