@@ -44,6 +44,8 @@ from models import (ReviewAction, ExceptionReviewAction, OverrideDecision, Copil
 from typing import List
 from engine import run_reconciliation, compute_benchmark, diff_batches
 from seed_data import generate_batch
+import realworld
+import recovery as recovery_svc
 from connectors import razorpay as rz
 from connectors.razorpay import ConnectorError
 from scheduler import BatchScheduler, CronError, next_fire
@@ -96,6 +98,9 @@ async def lifespan(_app):
         await db.raw_files.drop_index("batch_id_1")
         logger.info("dropped legacy unique raw_files.batch_id index")
     await db.exception_cases.create_index([("batch_id", 1), ("status", 1)])
+    await db.exception_cases.create_index([("taxonomy", 1), ("status", 1)])
+    await db.recovery_attempts.create_index([("case_id", 1), ("at", -1)])
+    await db.recovery_attempts.create_index("at")
     await db.exception_cases.create_index([("batch_id", 1), ("taxonomy", 1)])
     await db.exception_cases.create_index("status")
     await db.exception_cases.create_index([("value_at_risk_paise", -1)])
@@ -803,6 +808,86 @@ async def diff(base: str, compare: str, user: dict = Depends(get_current_user)):
     }
 
 
+# ------------------------------------------------------------------ realistic data
+@api.post("/batches/run-realistic")
+async def run_realistic_batch(user: dict = Depends(
+        require_roles(get_current_user, "analyst", "controller", "admin"))):
+    """One-click end-to-end run on PUBLIC Paysim data reshaped into A/B/C
+    ledgers with a declared anomaly profile. Returns batch + benchmark score."""
+    import random as _random
+    seq = await db.batches.count_documents({"source_label":
+                                           {"$regex": "^realworld:"}})
+    seed = 7 + seq * 10
+    rows, truth, profile = realworld.build_realistic_batch(seed=seed)
+    label = ("realworld:paysim(seed=%d; lag=%d drift=%d dup=%d miss=%d orphan=%d)"
+             % (seed, profile["timing_lag"], profile["amount_drift"],
+                profile["duplicates"], profile["missing_in_bank"],
+                profile["unidentified"]))
+    batch = await _process_batch(f"Realistic Batch #{seq + 1} (Paysim)", rows,
+                                 user["email"], user["role"], label,
+                                 truth=truth)
+    await audit_log(batch["id"], user["email"], user["role"], "batch_created",
+                    "batch", batch["id"], {"source": "realworld:paysim",
+                                           "profile": profile})
+    matches = await db.match_decisions.find({"batch_id": batch["id"]},
+                                            {"_id": 0}).to_list(5000)
+    excs = await db.exception_cases.find({"batch_id": batch["id"]},
+                                         {"_id": 0}).to_list(5000)
+    score = compute_benchmark(truth, matches, excs)
+    return {"batch": batch, "profile": profile, "has_truth": True,
+            "batch_id": batch["id"], "batch_name": batch["name"], **score}
+
+
+# ------------------------------------------------------------------ recovery
+@api.get("/recovery/plan")
+async def recovery_plan(batch_id: str = None,
+                        user: dict = Depends(get_current_user)):
+    return await recovery_svc.build_plan(db, batch_id=batch_id)
+
+
+@api.post("/recovery/execute")
+async def recovery_execute(request: Request,
+                           user: dict = Depends(require_roles(
+                               get_current_user, "analyst", "controller", "admin"))):
+    try:
+        body = await request.json() or {}
+    except Exception:  # noqa: BLE001 — empty body ok
+        body = {}
+    case_ids = [str(c) for c in (body.get("case_ids") or [])][:200]
+    if not case_ids:
+        raise HTTPException(status_code=400, detail="case_ids required")
+    out = await recovery_svc.execute(db, user, case_ids,
+                                     note=str(body.get("note") or "")[:280])
+    return out
+
+
+@api.get("/recovery/metrics")
+async def recovery_metrics(user: dict = Depends(get_current_user)):
+    return await recovery_svc.metrics(db)
+
+
+@api.get("/recovery/policy")
+async def get_recovery_policy(user: dict = Depends(get_current_user)):
+    return await recovery_svc.get_policy(db)
+
+
+@api.put("/recovery/policy")
+async def put_recovery_policy(request: Request,
+                              user: dict = Depends(require_roles(
+                                  get_current_user, "controller", "admin"))):
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    patch = {k: body[k] for k in (
+        "enabled", "max_attempts_per_case", "cool_off_hours",
+        "daily_value_cap_paise", "require_checker_above_paise",
+        "allowed_taxonomies") if k in body}
+    if not patch:
+        raise HTTPException(status_code=400, detail="no policy fields supplied")
+    return await recovery_svc.set_policy(db, user, patch)
+
+
 # ------------------------------------------------------------------ audit
 @api.get("/audit")
 async def audit(batch_id: str = None, user: dict = Depends(get_current_user),
@@ -1110,8 +1195,9 @@ async def delete_razorpay_credentials(user: dict = Depends(require_roles(get_cur
 
 
 async def _razorpay_sync_core(user: dict, hours_back: int = 24):
-    """Pull fresh settlements from the Razorpay API using vaulted creds and
-    reconcile them as one batch. Raises on missing credentials."""
+    """Pull fresh settlements + captured payments from the Razorpay API using
+    vaulted creds, derive the bank leg from settlement UTRs (declared), and
+    reconcile the trio as one batch. Raises on missing credentials."""
     from connectors import razorpay_api as rzapi
     raw = await _vault().get(RAZORPAY_SECRET_NAME)
     if not raw:
@@ -1120,10 +1206,16 @@ async def _razorpay_sync_core(user: dict, hours_back: int = 24):
 
     now_ts = int(datetime.now(timezone.utc).timestamp())
     transport = getattr(rzapi, "_transport_override", None)
-    rows = rzapi.fetch_settlements(
+    settlements = rzapi.fetch_settlements(
         creds["key_id"], creds["key_secret"],
         from_ts=now_ts - hours_back * 3600, to_ts=now_ts,
         transport=transport)
+    payments = rzapi.fetch_payments(
+        creds["key_id"], creds["key_secret"],
+        from_ts=now_ts - hours_back * 3600, to_ts=now_ts,
+        transport=transport)
+    bank_rows, missed = rzapi.derive_bank_rows(settlements)
+    rows = payments + settlements + bank_rows
     if not rows:
         return {"ok": True,
                 "message": "No settled settlements in the requested window",
@@ -1141,9 +1233,11 @@ async def _razorpay_sync_core(user: dict, hours_back: int = 24):
                         {"fingerprint": fingerprint[:16]})
         return {**existing, "deduplicated": True}
 
+    label = (f"connector:razorpay-api(A:{len(payments)},B:{len(settlements)},"
+             f"C:{len(bank_rows)}{',missed:' + str(missed) if missed else ''})")
     batch = await _process_batch(
-        f"Razorpay API sync ({len(rows)} settlements)", rows,
-        user["email"], user.get("role", "admin"), "connector:razorpay-api",
+        f"Razorpay API sync ({len(settlements)} settlements, {len(payments)} payments)",
+        rows, user["email"], user.get("role", "admin"), label,
         save_rows=rows, source_fingerprint=fingerprint)
     await audit_log(batch["id"], user["email"], user["role"], "batch_created",
                     "batch", batch["id"],

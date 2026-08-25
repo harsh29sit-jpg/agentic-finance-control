@@ -53,9 +53,9 @@ def fake_transport(monkeypatch):
     from connectors import razorpay_api as rzapi
     calls = []
 
-    def transport(url):
+    def transport(method, url):
         calls.append(url)
-        return json.loads(json.dumps(CANNED_API_RESPONSE))
+        return 200, json.loads(json.dumps(CANNED_API_RESPONSE))
 
     monkeypatch.setattr(rzapi, "_transport_override", transport)
     return calls
@@ -116,14 +116,10 @@ class TestApiSync:
         assert r.status_code == 200, r.text
         b = r.json()
         assert b["counts"]["B"] == 2                       # pending skipped
-        # settlements without bank credits on file -> MISSING_IN_BANK per case
-        excs = requests.get(
-            f"{BASE_URL}/api/exceptions?batch_id={b['id']}&taxonomy=MISSING_IN_BANK",
-            headers=admin, timeout=30).json()["items"]
-        utrs = {e["utr"] for e in excs}
-        assert {"HDFC2699911111111", "ICIC2699922222222"} <= utrs
-        amounts_by_utr = {e["utr"]: e["value_at_risk_paise"] for e in excs}
-        assert amounts_by_utr["HDFC2699911111111"] == 1234500   # paise verbatim
+        # derived bank leg completes the trio -> both settlements reconcile
+        assert b["counts"]["C"] == 2
+        assert b["metrics"]["open_exceptions"] == 0
+        assert b["source_label"].startswith("connector:razorpay-api(A:0,B:2,C:2)")
 
         r2 = requests.post(f"{BASE_URL}/api/integrations/razorpay/sync",
                            headers=admin, json={"hours_back": 24}, timeout=120)

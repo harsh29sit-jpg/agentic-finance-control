@@ -80,6 +80,15 @@ export default function Batches() {
     finally { setBusy(false); }
   };
 
+  const runRealistic = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post("/batches/run-realistic");
+      toast.success(`${data.batch_name} · precision ${data.auto_match_precision}% · recall ${data.match_recall}% · F1 ${data.f1_score}%`);
+      await load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Realistic run failed"); } finally { setBusy(false); }
+  };
+
   return (
     <div>
       <PageHeader title="Batch Ingestion" subtitle="Upload or schedule Source A / B / C ledgers · idempotent re-runs"
@@ -93,6 +102,10 @@ export default function Batches() {
             <Button variant="outline" className="h-9 gap-1.5 border-brand/40 text-brand hover:bg-brand/5" disabled={busy}
               data-testid="razorpay-btn" onClick={() => rzRef.current?.click()}>
               <Plug size={15} /> Razorpay Report
+            </Button>
+            <Button variant="outline" className="h-9 gap-1.5 border-brand/40 text-brand hover:bg-brand/5" disabled={busy}
+              data-testid="realistic-btn" onClick={runRealistic}>
+              <Database size={15} /> Run Realistic (Paysim)
             </Button>
           </>}
           {canSandbox && (

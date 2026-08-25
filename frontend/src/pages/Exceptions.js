@@ -5,6 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/StatusPill";
 import { EvidenceDrawer } from "@/components/EvidenceDrawer";
+import RecoveryPanel from "@/components/RecoveryPanel";
 import { rupees, rupeesCompact, TAXONOMY_LABEL } from "@/lib/format";
 import { toast } from "sonner";
 import { AlertTriangle, Clock, CheckCheck, ArrowUpCircle } from "lucide-react";
@@ -113,6 +114,7 @@ export default function Exceptions() {
           </div>} />
 
       <div className="space-y-4 p-6">
+        {batchId && <RecoveryPanel batchId={batchId} />}
         {data.grouped ? (
           data.groups.length === 0 ? <Empty /> : data.groups.map((g) => (
             <div key={g.key} className="overflow-hidden rounded-md border border-border">
